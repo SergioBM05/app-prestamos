@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getAuth, signOut } from 'firebase/auth';
+import { API_URL } from '../services/api';
 
 export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [user, setUser] = useState(initialUser);
@@ -71,7 +72,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             const currentToken = await getValidToken();
             if (!currentToken) return;
 
-            const response = await fetch('http://localhost:4000/api/auth/me', {
+            const response = await fetch(`${API_URL}/api/auth/me`, {
                 headers: {
                     'Authorization': `Bearer ${currentToken}`
                 }
@@ -91,7 +92,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             const currentToken = await getValidToken();
             if (!currentToken) throw new Error('No hay sesión activa');
 
-            const response = await fetch('http://localhost:4000/api/loans', {
+            const response = await fetch(`${API_URL}/api/loans`, {
                 headers: {
                     'Authorization': `Bearer ${currentToken}`
                 }
@@ -135,8 +136,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             if (!currentToken) throw new Error('No hay sesión activa');
 
             const url = editingLoan
-                ? `http://localhost:4000/api/loans/${editingLoan}`
-                : 'http://localhost:4000/api/loans';
+                ? `${API_URL}/api/loans/${editingLoan}`
+                : `${API_URL}/api/loans`;
 
             const method = editingLoan ? 'PUT' : 'POST';
 
@@ -186,7 +187,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
         try {
             const currentToken = await getValidToken();
-            const response = await fetch(`http://localhost:4000/api/loans/${loanToDelete.id}`, {
+            const response = await fetch(`${API_URL}/api/loans/${loanToDelete.id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${currentToken}` }
             });
@@ -216,7 +217,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
         try {
             const currentToken = await getValidToken();
-            const response = await fetch(`http://localhost:4000/api/loans/${loan.id}`, {
+            const response = await fetch(`${API_URL}/api/loans/${loan.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -253,7 +254,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             const currentToken = await getValidToken();
             if (!currentToken) throw new Error('No hay sesión activa');
 
-            const response = await fetch(`http://localhost:4000/api/loans/${selectedLoanForPayment.id}/payments`, {
+            const response = await fetch(`${API_URL}/api/loans/${selectedLoanForPayment.id}/payments`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

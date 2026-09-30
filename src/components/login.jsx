@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../services/firebase'; 
+import { API_URL } from '../services/api';
 
 export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -18,7 +19,7 @@ export default function Login({ onLoginSuccess }) {
       const userCredential = await signInWithEmailAndPassword(auth, internalEmail, password);
       const token = await userCredential.user.getIdToken();
 
-      const response = await fetch('http://localhost:4000/api/auth/me', {
+      const response = await fetch(`${API_URL}/api/auth/me`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getAuth, signOut } from 'firebase/auth';
+import { API_URL } from '../services/api';
 
 export default function ClientDashboard({ user: initialUser, token, onLogout }) {
     const [user, setUser] = useState(initialUser);
@@ -27,7 +28,7 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
             const currentToken = await getValidToken();
             if (!currentToken) throw new Error('No hay sesión activa');
 
-            const response = await fetch('http://localhost:4000/api/loans/my-loan', {
+            const response = await fetch(`${API_URL}/api/loans/my-loan`, {
                 headers: {
                     'Authorization': `Bearer ${currentToken}`
                 }
