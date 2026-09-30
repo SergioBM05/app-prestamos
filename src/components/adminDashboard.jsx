@@ -35,6 +35,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         installmentAmount: ''
     });
     const [submitting, setSubmitting] = useState(false);
+    const [formError, setFormError] = useState('');
+    const [loanToComplete, setLoanToComplete] = useState(null);
+    const [completingLoan, setCompletingLoan] = useState(false);
+    const [completeError, setCompleteError] = useState('');
+    const [completeSuccessMessage, setCompleteSuccessMessage] = useState(null);
+    const [copiedCredential, setCopiedCredential] = useState('');
 
     const getValidToken = async () => {
         if (token) return token;
@@ -112,12 +118,14 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
+        setFormError('');
         setFormData({ clientName: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
         setIsModalOpen(true);
     };
 
     const handleOpenEditModal = (loan) => {
         setEditingLoan(loan.id);
+        setFormError('');
         setFormData({
             clientName: loan.clientName || '',
             totalDebt: loan.totalDebt || '',
@@ -163,13 +171,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             fetchLoans();
         } catch (err) {
             console.error(err);
-            alert(err.message);
+            setFormError(err.message);
         } finally {
             setSubmitting(false);
         }
     };
 
-    // Abre el modal chulo de confirmación en lugar de usar window.confirm
     const handleOpenDeleteModal = (loan) => {
         setLoanToDelete(loan);
         setDeleteError('');
@@ -212,12 +219,22 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         }
     };
 
-    const handleCompleteLoan = async (loan) => {
-        if (!window.confirm(`¿Deseas dar por terminada la deuda de ${loan.clientName}?`)) return;
+    const handleCompleteLoan = (loan) => {
+        setLoanToComplete(loan);
+        setCompleteError('');
+        setCompleteSuccessMessage(null);
+    };
+
+    const handleConfirmCompleteLoan = async () => {
+        if (!loanToComplete) return;
+
+        setCompletingLoan(true);
+        setCompleteError('');
+        setCompleteSuccessMessage(null);
 
         try {
             const currentToken = await getValidToken();
-            const response = await fetch(`${API_URL}/api/loans/${loan.id}`, {
+            const response = await fetch(`${API_URL}/api/loans/${loanToComplete.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -227,10 +244,27 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             });
 
             if (!response.ok) throw new Error('Error al actualizar el estado del préstamo');
-            fetchLoans();
+            setCompleteSuccessMessage('La deuda se marcó como pagada correctamente.');
+            setTimeout(() => {
+                setLoanToComplete(null);
+                setCompleteSuccessMessage(null);
+                fetchLoans();
+            }, 1200);
         } catch (err) {
             console.error(err);
-            alert(err.message);
+            setCompleteError(err.message);
+        } finally {
+            setCompletingLoan(false);
+        }
+    };
+
+    const handleCopyCredential = async (credentialName, value) => {
+        try {
+            await navigator.clipboard.writeText(value);
+            setCopiedCredential(credentialName);
+            setTimeout(() => setCopiedCredential(''), 1500);
+        } catch (err) {
+            console.error('No se pudo copiar la credencial', err);
         }
     };
 
@@ -383,8 +417,9 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             No hay préstamos registrados todavía. ¡Crea el primero arriba!
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
+                        <>
+                        <div className="hidden overflow-x-auto md:block">
+                            <table className="w-full min-w-[980px] text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-semibold uppercase tracking-wider text-slate-400">
                                         <th className="py-4 px-6">Cliente</th>
@@ -479,6 +514,83 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </tbody>
                             </table>
                         </div>
+                        <div className="grid gap-4 p-4 md:hidden">
+                            {loans.map((loan) => {
+                                const totalDebt = Number(loan.totalDebt) || 0;
+                                const interestRate = Number(loan.interestRate) || 0;
+                                const totalWithInterest = totalDebt * (1 + interestRate / 100);
+                                const remaining = Number(loan.remainingDebt) || 0;
+                                const paidSoFar = Math.max(0, totalDebt - remaining);
+
+                                return (
+                                    <article key={loan.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 shadow-lg">
+                                        <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+                                            <div className="min-w-0">
+                                                <h3 className="truncate font-semibold text-white">{loan.clientName}</h3>
+                                                <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</p>
+                                            </div>
+                                            <span className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${loan.status === 'Pagado'
+                                                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                                                : 'border-amber-500/20 bg-amber-500/10 text-amber-400'
+                                                }`}>
+                                                {loan.status || 'Activo'}
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-x-4 gap-y-4 py-4">
+                                            <div>
+                                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deuda restante</span>
+                                                <span className="mt-1 block font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                {paidSoFar > 0 && <span className="mt-0.5 block text-[11px] text-emerald-400">Abonado: ${paidSoFar.toLocaleString()}</span>}
+                                            </div>
+                                            <div>
+                                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total con interés</span>
+                                                <span className="mt-1 block font-semibold text-slate-200">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                <span className="mt-0.5 block text-[11px] text-indigo-300/80">Base: ${totalDebt.toLocaleString()} ({interestRate}%)</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-3">
+                                            {loan.status !== 'Pagado' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleOpenPaymentModal(loan)}
+                                                        className="min-h-11 rounded-xl border border-indigo-500/30 bg-indigo-600/20 px-3 py-2 text-xs font-semibold text-indigo-300 transition-colors hover:bg-indigo-600/30"
+                                                    >
+                                                        💵 Abonar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => sendWhatsAppReminder(loan)}
+                                                        className="min-h-11 rounded-xl border border-emerald-500/30 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-600/30"
+                                                    >
+                                                        💬 WhatsApp
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCompleteLoan(loan)}
+                                                        className="min-h-11 rounded-xl border border-teal-500/20 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-400 transition-colors hover:bg-teal-500/20"
+                                                    >
+                                                        ✓ Terminar
+                                                    </button>
+                                                </>
+                                            )}
+                                            <button
+                                                onClick={() => handleOpenEditModal(loan)}
+                                                className="min-h-11 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-400 transition-colors hover:bg-indigo-500/20"
+                                            >
+                                                Editar
+                                            </button>
+                                            <button
+                                                onClick={() => handleOpenDeleteModal(loan)}
+                                                className="min-h-11 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20"
+                                            >
+                                                Eliminar
+                                            </button>
+                                        </div>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                        </>
                     )}
                 </div>
 
@@ -514,6 +626,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                         </div>
 
                         <form onSubmit={handleSaveLoan} className="space-y-4">
+                            {formError && (
+                                <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs rounded-xl text-center">
+                                    {formError}
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
                                     Nombre del Cliente
@@ -633,13 +751,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     <span className="text-sm font-mono font-bold text-emerald-400">{newCredentials.username}</span>
                                 </div>
                                 <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(newCredentials.username);
-                                        alert('¡Usuario copiado al portapapeles!');
-                                    }}
+                                    onClick={() => handleCopyCredential('username', newCredentials.username)}
                                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                                 >
-                                    Copiar
+                                    {copiedCredential === 'username' ? 'Copiado' : 'Copiar'}
                                 </button>
                             </div>
 
@@ -649,13 +764,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     <span className="text-sm font-mono font-bold text-indigo-400">{newCredentials.password}</span>
                                 </div>
                                 <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(newCredentials.password);
-                                        alert('¡Contraseña copiada al portapapeles!');
-                                    }}
+                                    onClick={() => handleCopyCredential('password', newCredentials.password)}
                                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                                 >
-                                    Copiar
+                                    {copiedCredential === 'password' ? 'Copiado' : 'Copiar'}
                                 </button>
                             </div>
                         </div>
@@ -827,6 +939,68 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             </div>
                         </div>
 
+                    </div>
+                </div>
+            )}
+
+            {loanToComplete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                    <div className="absolute w-72 h-72 bg-teal-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+                    <div className="relative w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-600 to-cyan-400 flex items-center justify-center text-white shadow-md shadow-teal-500/20">
+                                    ✓
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-white tracking-tight">Terminar préstamo</h3>
+                                    <p className="text-xs text-slate-400">Marcar la deuda como pagada</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setLoanToComplete(null)}
+                                className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/50 transition-all duration-200 cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {completeError && (
+                                <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs rounded-xl text-center">
+                                    {completeError}
+                                </div>
+                            )}
+
+                            {completeSuccessMessage && (
+                                <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold rounded-xl text-center animate-[fadeIn_0.2s_ease-out]">
+                                    {completeSuccessMessage}
+                                </div>
+                            )}
+
+                            <p className="text-sm text-slate-300">
+                                ¿Deseas dar por terminada la deuda de <span className="font-bold text-white">{loanToComplete.clientName}</span>?
+                            </p>
+
+                            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800/80">
+                                <button
+                                    type="button"
+                                    onClick={() => setLoanToComplete(null)}
+                                    className="px-5 py-3 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-sm font-semibold rounded-2xl border border-slate-700/60 transition-all duration-200 cursor-pointer"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleConfirmCompleteLoan}
+                                    disabled={completingLoan || completeSuccessMessage}
+                                    className="px-6 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white text-sm font-semibold rounded-2xl shadow-lg shadow-teal-600/30 transition-all duration-300 disabled:opacity-50 cursor-pointer"
+                                >
+                                    {completingLoan ? 'Actualizando...' : 'Sí, terminar'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
