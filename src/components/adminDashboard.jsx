@@ -29,6 +29,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [editingLoan, setEditingLoan] = useState(null);
     const [formData, setFormData] = useState({
         clientName: '',
+        duenyoDinero: '',
         totalDebt: '',
         interestRate: '',
         frequency: 'Mensual',
@@ -119,7 +120,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
+        setFormData({ clientName: '',duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
         setIsModalOpen(true);
     };
 
@@ -128,6 +129,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         setFormError('');
         setFormData({
             clientName: loan.clientName || '',
+            duenyoDinero: loan.duenyoDinero|| '',
             totalDebt: loan.totalDebt || '',
             interestRate: loan.interestRate || '',
             frequency: loan.frequency || 'Mensual',
@@ -165,7 +167,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 setNewCredentials(data.credentials);
             }
 
-            setFormData({ clientName: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
+            setFormData({ clientName: '',duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -418,178 +420,184 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                         </div>
                     ) : (
                         <>
-                        <div className="hidden overflow-x-auto md:block">
-                            <table className="w-full min-w-[980px] text-left border-collapse">
-                                <thead>
-                                    <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                                        <th className="py-4 px-6">Cliente</th>
-                                        <th className="py-4 px-6">Deuda Restante / Abonos</th>
-                                        <th className="py-4 px-6">Capital e Interés Total</th>
-                                        <th className="py-4 px-6">Frecuencia / Cuota</th>
-                                        <th className="py-4 px-6">Estado</th>
-                                        <th className="py-4 px-6 text-right">Acciones de Gestión</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-800/60 text-sm">
-                                    {loans.map((loan) => {
-                                        const totalDebt = Number(loan.totalDebt) || 0;
-                                        const interestRate = Number(loan.interestRate) || 0;
-                                        const totalWithInterest = totalDebt * (1 + interestRate / 100);
-                                        const remaining = Number(loan.remainingDebt) || 0;
-                                        const paidSoFar = Math.max(0, totalDebt - remaining);
+                            <div className="hidden overflow-x-auto md:block">
+                                <table className="w-full min-w-[980px] text-left border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                                            <th className="py-4 px-6">Cliente</th>
+                                            <th className="py-4 px-6">Deuda Restante / Abonos</th>
+                                            <th className="py-4 px-6">Capital e Interés Total</th>
+                                            <th className="py-4 px-6">Frecuencia / Cuota</th>
+                                            <th className="py-4 px-6">Estado</th>
+                                            <th className="py-4 px-6 text-right">Acciones de Gestión</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/60 text-sm">
+                                        {loans.map((loan) => {
+                                            const totalDebt = Number(loan.totalDebt) || 0;
+                                            const interestRate = Number(loan.interestRate) || 0;
+                                            const totalWithInterest = totalDebt * (1 + interestRate / 100);
+                                            const remaining = Number(loan.remainingDebt) || 0;
+                                            const paidSoFar = Math.max(0, totalDebt - remaining);
 
-                                        return (
-                                            <tr key={loan.id} className="hover:bg-slate-800/30 transition-colors">
-                                                <td className="py-4 px-6 font-semibold text-white">
-                                                    <div>{loan.clientName}</div>
-                                                </td>
-                                                <td className="py-4 px-6">
-                                                    <div className="font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                                    {paidSoFar > 0 && (
-                                                        <span className="text-[11px] text-emerald-400 font-medium block">
-                                                            Abonado: ${paidSoFar.toLocaleString()}
+                                            return (
+                                                <tr key={loan.id} className="hover:bg-slate-800/30 transition-colors">
+                                                    <td className="py-4 px-6 font-semibold text-white">
+                                                        <div>{loan.clientName}</div>
+                                                        <div className="mt-1 text-[11px] font-medium text-slate-400">
+                                                            Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-4 px-6">
+                                                        <div className="font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                        {paidSoFar > 0 && (
+                                                            <span className="text-[11px] text-emerald-400 font-medium block">
+                                                                Abonado: ${paidSoFar.toLocaleString()}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="py-4 px-6">
+                                                        <div className="text-slate-200 font-semibold">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                        <span className="text-[11px] text-indigo-300/80">
+                                                            Base: ${totalDebt.toLocaleString()} ({interestRate}% int.)
                                                         </span>
-                                                    )}
-                                                </td>
-                                                <td className="py-4 px-6">
-                                                    <div className="text-slate-200 font-semibold">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                                    <span className="text-[11px] text-indigo-300/80">
-                                                        Base: ${totalDebt.toLocaleString()} ({interestRate}% int.)
-                                                    </span>
-                                                </td>
-                                                <td className="py-4 px-6 text-slate-300">
-                                                    <div className="font-medium">{loan.frequency}</div>
-                                                    <span className="text-[11px] text-slate-400">Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</span>
-                                                </td>
-                                                <td className="py-4 px-6">
-                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${loan.status === 'Pagado'
-                                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                                                        }`}>
-                                                        {loan.status || 'Activo'}
-                                                    </span>
-                                                </td>
-                                                <td className="py-4 px-6 text-right space-x-1.5 whitespace-nowrap">
-                                                    {loan.status !== 'Pagado' && (
-                                                        <>
-                                                            <button
-                                                                onClick={() => handleOpenPaymentModal(loan)}
-                                                                title="Registrar abono parcial"
-                                                                className="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                                                            >
-                                                                💵 Abonar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => sendWhatsAppReminder(loan)}
-                                                                title="Enviar recordatorio de pago por WhatsApp"
-                                                                className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                                                            >
-                                                                💬 WhatsApp
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCompleteLoan(loan)}
-                                                                title="Dar por terminado"
-                                                                className="px-2.5 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                                                            >
-                                                                ✓ Terminar
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleOpenEditModal(loan)}
-                                                        className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                                                    >
-                                                        Editar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleOpenDeleteModal(loan)}
-                                                        className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                                                    >
-                                                        Eliminar
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="grid gap-4 p-4 md:hidden">
-                            {loans.map((loan) => {
-                                const totalDebt = Number(loan.totalDebt) || 0;
-                                const interestRate = Number(loan.interestRate) || 0;
-                                const totalWithInterest = totalDebt * (1 + interestRate / 100);
-                                const remaining = Number(loan.remainingDebt) || 0;
-                                const paidSoFar = Math.max(0, totalDebt - remaining);
+                                                    </td>
+                                                    <td className="py-4 px-6 text-slate-300">
+                                                        <div className="font-medium">{loan.frequency}</div>
+                                                        <span className="text-[11px] text-slate-400">Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</span>
+                                                    </td>
+                                                    <td className="py-4 px-6">
+                                                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${loan.status === 'Pagado'
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                                            }`}>
+                                                            {loan.status || 'Activo'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-4 px-6 text-right space-x-1.5 whitespace-nowrap">
+                                                        {loan.status !== 'Pagado' && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => handleOpenPaymentModal(loan)}
+                                                                    title="Registrar abono parcial"
+                                                                    className="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                                >
+                                                                    💵 Abonar
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => sendWhatsAppReminder(loan)}
+                                                                    title="Enviar recordatorio de pago por WhatsApp"
+                                                                    className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                                >
+                                                                    💬 WhatsApp
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleCompleteLoan(loan)}
+                                                                    title="Dar por terminado"
+                                                                    className="px-2.5 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                                >
+                                                                    ✓ Terminar
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleOpenEditModal(loan)}
+                                                            className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                        >
+                                                            Editar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleOpenDeleteModal(loan)}
+                                                            className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                        >
+                                                            Eliminar
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="grid gap-4 p-4 md:hidden">
+                                {loans.map((loan) => {
+                                    const totalDebt = Number(loan.totalDebt) || 0;
+                                    const interestRate = Number(loan.interestRate) || 0;
+                                    const totalWithInterest = totalDebt * (1 + interestRate / 100);
+                                    const remaining = Number(loan.remainingDebt) || 0;
+                                    const paidSoFar = Math.max(0, totalDebt - remaining);
 
-                                return (
-                                    <article key={loan.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 shadow-lg">
-                                        <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
-                                            <div className="min-w-0">
-                                                <h3 className="truncate font-semibold text-white">{loan.clientName}</h3>
-                                                <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</p>
+                                    return (
+                                        <article key={loan.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 shadow-lg">
+                                            <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+                                                <div className="min-w-0">
+                                                    <h3 className="truncate font-semibold text-white">{loan.clientName}</h3>
+                                                    <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
+                                                        Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</p>
+                                                </div>
+                                                <span className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${loan.status === 'Pagado'
+                                                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                                                    : 'border-amber-500/20 bg-amber-500/10 text-amber-400'
+                                                    }`}>
+                                                    {loan.status || 'Activo'}
+                                                </span>
                                             </div>
-                                            <span className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${loan.status === 'Pagado'
-                                                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                                                : 'border-amber-500/20 bg-amber-500/10 text-amber-400'
-                                                }`}>
-                                                {loan.status || 'Activo'}
-                                            </span>
-                                        </div>
 
-                                        <div className="grid grid-cols-2 gap-x-4 gap-y-4 py-4">
-                                            <div>
-                                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deuda restante</span>
-                                                <span className="mt-1 block font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                {paidSoFar > 0 && <span className="mt-0.5 block text-[11px] text-emerald-400">Abonado: ${paidSoFar.toLocaleString()}</span>}
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-4 py-4">
+                                                <div>
+                                                    <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deuda restante</span>
+                                                    <span className="mt-1 block font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    {paidSoFar > 0 && <span className="mt-0.5 block text-[11px] text-emerald-400">Abonado: ${paidSoFar.toLocaleString()}</span>}
+                                                </div>
+                                                <div>
+                                                    <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total con interés</span>
+                                                    <span className="mt-1 block font-semibold text-slate-200">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    <span className="mt-0.5 block text-[11px] text-indigo-300/80">Base: ${totalDebt.toLocaleString()} ({interestRate}%)</span>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total con interés</span>
-                                                <span className="mt-1 block font-semibold text-slate-200">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                <span className="mt-0.5 block text-[11px] text-indigo-300/80">Base: ${totalDebt.toLocaleString()} ({interestRate}%)</span>
-                                            </div>
-                                        </div>
 
-                                        <div className="grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-3">
-                                            {loan.status !== 'Pagado' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleOpenPaymentModal(loan)}
-                                                        className="min-h-11 rounded-xl border border-indigo-500/30 bg-indigo-600/20 px-3 py-2 text-xs font-semibold text-indigo-300 transition-colors hover:bg-indigo-600/30"
-                                                    >
-                                                        💵 Abonar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => sendWhatsAppReminder(loan)}
-                                                        className="min-h-11 rounded-xl border border-emerald-500/30 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-600/30"
-                                                    >
-                                                        💬 WhatsApp
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCompleteLoan(loan)}
-                                                        className="min-h-11 rounded-xl border border-teal-500/20 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-400 transition-colors hover:bg-teal-500/20"
-                                                    >
-                                                        ✓ Terminar
-                                                    </button>
-                                                </>
-                                            )}
-                                            <button
-                                                onClick={() => handleOpenEditModal(loan)}
-                                                className="min-h-11 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-400 transition-colors hover:bg-indigo-500/20"
-                                            >
-                                                Editar
-                                            </button>
-                                            <button
-                                                onClick={() => handleOpenDeleteModal(loan)}
-                                                className="min-h-11 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20"
-                                            >
-                                                Eliminar
-                                            </button>
-                                        </div>
-                                    </article>
-                                );
-                            })}
-                        </div>
+                                            <div className="grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-3">
+                                                {loan.status !== 'Pagado' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleOpenPaymentModal(loan)}
+                                                            className="min-h-11 rounded-xl border border-indigo-500/30 bg-indigo-600/20 px-3 py-2 text-xs font-semibold text-indigo-300 transition-colors hover:bg-indigo-600/30"
+                                                        >
+                                                            💵 Abonar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendWhatsAppReminder(loan)}
+                                                            className="min-h-11 rounded-xl border border-emerald-500/30 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-600/30"
+                                                        >
+                                                            💬 WhatsApp
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCompleteLoan(loan)}
+                                                            className="min-h-11 rounded-xl border border-teal-500/20 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-400 transition-colors hover:bg-teal-500/20"
+                                                        >
+                                                            ✓ Terminar
+                                                        </button>
+                                                    </>
+                                                )}
+                                                <button
+                                                    onClick={() => handleOpenEditModal(loan)}
+                                                    className="min-h-11 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-400 transition-colors hover:bg-indigo-500/20"
+                                                >
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenDeleteModal(loan)}
+                                                    className="min-h-11 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20"
+                                                >
+                                                    Eliminar
+                                                </button>
+                                            </div>
+                                        </article>
+                                    );
+                                })}
+                            </div>
                         </>
                     )}
                 </div>
@@ -642,6 +650,19 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     value={formData.clientName}
                                     onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
                                     placeholder="Ej. Carlos Mendoza"
+                                    className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                    Dueño del dinero
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={formData.duenyoDinero}
+                                    onChange={(e) => setFormData({ ...formData, duenyoDinero: e.target.value })}
                                     className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
                                 />
                             </div>
