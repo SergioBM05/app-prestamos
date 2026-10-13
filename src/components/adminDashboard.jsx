@@ -164,7 +164,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             if (!response.ok) throw new Error(data.message || 'Error al guardar el préstamo');
 
             if (data.credentials) {
-                setNewCredentials(data.credentials);
+                setNewCredentials({
+                    ...data.credentials,
+                    username: String(data.credentials.username || '').replace(/\d/g, '')
+                });
             }
 
             setFormData({ clientName: '',duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
@@ -303,7 +306,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             if (!response.ok) throw new Error(data.message || 'Error al registrar el pago');
 
             // Mostramos el mensaje de éxito bonito dentro del modal en lugar de un alert
-            setPaymentSuccessMessage(`¡Abono registrado con éxito! Nueva deuda restante: $${data.remainingDebt.toLocaleString()}`);
+            setPaymentSuccessMessage(`¡Abono registrado con éxito! Nueva deuda restante: $${formatCurrency(data.remainingDebt)}`);
 
             // Esperamos 1.5 segundos para que el admin vea el mensaje de éxito antes de cerrar el modal automáticamente
             setTimeout(() => {
@@ -334,6 +337,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         window.open(whatsappUrl, '_blank');
     };
 
+    const formatCurrency = (value) => Math.round(Number(value) || 0).toLocaleString();
     const totalDebtSum = loans.reduce((acc, loan) => acc + (Number(loan.remainingDebt) || 0), 0);
     const activeClientsCount = loans.length;
 
@@ -343,7 +347,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             <div className="absolute top-0 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none"></div>
             <div className="absolute bottom-0 -right-40 w-96 h-96 bg-cyan-600/15 rounded-full blur-[140px] pointer-events-none"></div>
 
-            <div className="relative max-w-7xl mx-auto space-y-8">
+            <div className="relative max-w-7xl mx-auto w-full min-w-0 space-y-8">
 
                 {/* Cabecera del Panel */}
                 <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl animate-[fadeIn_0.6s_ease-out_forwards]">
@@ -382,7 +386,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-6 rounded-3xl shadow-lg animate-[fadeIn_0.8s_ease-out_0.2s_both]">
                         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Deuda Total Activa</p>
                         <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
-                            ${totalDebtSum.toLocaleString()}
+                            ${formatCurrency(totalDebtSum)}
                         </h3>
                     </div>
                     <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-6 rounded-3xl shadow-lg animate-[fadeIn_0.8s_ease-out_0.3s_both]">
@@ -449,22 +453,22 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                         </div>
                                                     </td>
                                                     <td className="py-4 px-6">
-                                                        <div className="font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                        <div className="font-bold text-indigo-400">${formatCurrency(remaining)}</div>
                                                         {paidSoFar > 0 && (
                                                             <span className="text-[11px] text-emerald-400 font-medium block">
-                                                                Abonado: ${paidSoFar.toLocaleString()}
+                                                                Abonado: ${formatCurrency(paidSoFar)}
                                                             </span>
                                                         )}
                                                     </td>
                                                     <td className="py-4 px-6">
-                                                        <div className="text-slate-200 font-semibold">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                        <div className="text-slate-200 font-semibold">${formatCurrency(totalWithInterest)}</div>
                                                         <span className="text-[11px] text-indigo-300/80">
-                                                            Base: ${totalDebt.toLocaleString()} ({interestRate}% int.)
+                                                            Base: ${formatCurrency(totalDebt)} ({interestRate}% int.)
                                                         </span>
                                                     </td>
                                                     <td className="py-4 px-6 text-slate-300">
                                                         <div className="font-medium">{loan.frequency}</div>
-                                                        <span className="text-[11px] text-slate-400">Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</span>
+                                                        <span className="text-[11px] text-slate-400">Cuota: ${formatCurrency(loan.installmentAmount)}</span>
                                                     </td>
                                                     <td className="py-4 px-6">
                                                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${loan.status === 'Pagado'
@@ -535,7 +539,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                     <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
                                                         Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                     </p>
-                                                    <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${Number(loan.installmentAmount || 0).toLocaleString()}</p>
+                                                    <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${formatCurrency(loan.installmentAmount)}</p>
                                                 </div>
                                                 <span className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${loan.status === 'Pagado'
                                                     ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
@@ -548,51 +552,65 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                             <div className="grid grid-cols-2 gap-x-4 gap-y-4 py-4">
                                                 <div>
                                                     <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deuda restante</span>
-                                                    <span className="mt-1 block font-bold text-indigo-400">${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    {paidSoFar > 0 && <span className="mt-0.5 block text-[11px] text-emerald-400">Abonado: ${paidSoFar.toLocaleString()}</span>}
+                                                    <span className="mt-1 block font-bold text-indigo-400">${formatCurrency(remaining)}</span>
+                                                    {paidSoFar > 0 && <span className="mt-0.5 block text-[11px] text-emerald-400">Abonado: ${formatCurrency(paidSoFar)}</span>}
                                                 </div>
                                                 <div>
                                                     <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total con interés</span>
-                                                    <span className="mt-1 block font-semibold text-slate-200">${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    <span className="mt-0.5 block text-[11px] text-indigo-300/80">Base: ${totalDebt.toLocaleString()} ({interestRate}%)</span>
+                                                    <span className="mt-1 block font-semibold text-slate-200">${formatCurrency(totalWithInterest)}</span>
+                                                    <span className="mt-0.5 block text-[11px] text-indigo-300/80">Base: ${formatCurrency(totalDebt)} ({interestRate}%)</span>
                                                 </div>
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-3">
+                                            <div className="mt-1 border-t border-slate-800/80 pt-4">
                                                 {loan.status !== 'Pagado' && (
-                                                    <>
+                                                    <div className="space-y-3">
                                                         <button
                                                             onClick={() => handleOpenPaymentModal(loan)}
-                                                            className="min-h-11 rounded-xl border border-indigo-500/30 bg-indigo-600/20 px-3 py-2 text-xs font-semibold text-indigo-300 transition-colors hover:bg-indigo-600/30"
+                                                            className="group flex min-h-14 w-full items-center justify-between rounded-2xl border border-indigo-400/40 bg-gradient-to-r from-indigo-600/30 via-indigo-600/20 to-cyan-500/10 px-4 py-3 text-left shadow-lg shadow-indigo-950/30 transition-all hover:border-indigo-300/60 hover:from-indigo-600/40 active:scale-[0.99]"
                                                         >
-                                                            💵 Abonar
+                                                            <span className="flex items-center gap-3">
+                                                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-400/20 text-lg">💵</span>
+                                                                <span>
+                                                                    <span className="block text-sm font-bold text-indigo-100">Registrar abono</span>
+                                                                    <span className="mt-0.5 block text-[11px] text-indigo-200/60">Actualizar deuda restante</span>
+                                                                </span>
+                                                            </span>
+                                                            <span className="text-xl text-indigo-200 transition-transform group-hover:translate-x-1">›</span>
                                                         </button>
-                                                        <button
-                                                            onClick={() => sendWhatsAppReminder(loan)}
-                                                            className="min-h-11 rounded-xl border border-emerald-500/30 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-600/30"
-                                                        >
-                                                            💬 WhatsApp
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleCompleteLoan(loan)}
-                                                            className="min-h-11 rounded-xl border border-teal-500/20 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-400 transition-colors hover:bg-teal-500/20"
-                                                        >
-                                                            ✓ Terminar
-                                                        </button>
-                                                    </>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <button
+                                                                onClick={() => sendWhatsAppReminder(loan)}
+                                                                className="flex min-h-14 flex-col items-start justify-center rounded-2xl border border-emerald-500/30 bg-emerald-600/10 px-4 py-3 text-left transition-all hover:bg-emerald-600/20 active:scale-[0.98]"
+                                                            >
+                                                                <span className="text-lg">💬</span>
+                                                                <span className="mt-1 text-xs font-bold text-emerald-300">WhatsApp</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCompleteLoan(loan)}
+                                                                className="flex min-h-14 flex-col items-start justify-center rounded-2xl border border-teal-500/30 bg-teal-500/10 px-4 py-3 text-left transition-all hover:bg-teal-500/20 active:scale-[0.98]"
+                                                            >
+                                                                <span className="text-lg">✓</span>
+                                                                <span className="mt-1 text-xs font-bold text-teal-300">Terminar</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 )}
-                                                <button
-                                                    onClick={() => handleOpenEditModal(loan)}
-                                                    className="min-h-11 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-400 transition-colors hover:bg-indigo-500/20"
-                                                >
-                                                    Editar
-                                                </button>
-                                                <button
-                                                    onClick={() => handleOpenDeleteModal(loan)}
-                                                    className="min-h-11 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20"
-                                                >
-                                                    Eliminar
-                                                </button>
+                                                <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-800/80 pt-3">
+                                                    <button
+                                                        onClick={() => handleOpenEditModal(loan)}
+                                                        className="min-h-11 flex-1 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 transition-all hover:bg-indigo-500/20 active:scale-[0.98]"
+                                                    >
+                                                        ✎ Editar datos
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleOpenDeleteModal(loan)}
+                                                        aria-label={`Eliminar préstamo de ${loan.clientName}`}
+                                                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/10 text-base text-rose-400 transition-all hover:bg-rose-500/20 active:scale-[0.98]"
+                                                    >
+                                                        🗑
+                                                    </button>
+                                                </div>
                                             </div>
                                         </article>
                                     );
@@ -858,7 +876,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
                             <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-1">
                                 <span className="text-xs text-slate-400 block">Deuda Restante Actual:</span>
-                                <span className="text-2xl font-extrabold text-indigo-400">${Number(selectedLoanForPayment.remainingDebt).toLocaleString()}</span>
+                                <span className="text-2xl font-extrabold text-indigo-400">${formatCurrency(selectedLoanForPayment.remainingDebt)}</span>
                             </div>
 
                             <div>

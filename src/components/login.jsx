@@ -53,7 +53,7 @@ export default function Login({ onLoginSuccess }) {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none"></div>
 
       {/* Tarjeta principal con animación de entrada (Fade In + Scale Up) */}
-      <div className="relative w-full max-w-md bg-slate-900/75 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.7)] p-8 sm:p-10 animate-[fadeIn_0.8s_cubic-bezier(0.16,1,0.3,1)_forwards]">
+      <div className="relative w-full min-w-0 max-w-md bg-slate-900/75 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.7)] p-6 sm:p-10 animate-[fadeIn_0.8s_cubic-bezier(0.16,1,0.3,1)_forwards]">
         
         {/* Cabecera con animación en cascada */}
         <div className="text-center mb-8 animate-[slideDown_0.6s_ease-out_0.2s_both]">

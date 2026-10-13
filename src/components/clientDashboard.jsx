@@ -80,34 +80,34 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
             <div className="absolute top-0 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none"></div>
             <div className="absolute bottom-0 -right-40 w-96 h-96 bg-cyan-600/15 rounded-full blur-[140px] pointer-events-none"></div>
 
-            <div className="relative max-w-4xl mx-auto w-full space-y-8 my-auto">
+            <div className="relative max-w-4xl mx-auto w-full min-w-0 space-y-8 my-auto">
 
                 {/* Cabecera del Portal */}
-                <header className="flex items-center justify-between bg-slate-900/60 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl">
-                    <div className="flex items-center space-x-4">
+                <header className="flex items-center justify-between gap-3 bg-slate-900/60 backdrop-blur-2xl border border-slate-800/80 p-4 sm:p-6 rounded-3xl shadow-xl">
+                    <div className="flex min-w-0 items-center space-x-3 sm:space-x-4">
                         <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-400 text-white shadow-lg shadow-indigo-500/30">
                             ⚡
                         </div>
-                        <div>
+                        <div className="min-w-0">
                             <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
                                 Portal Financiero
                             </h1>
                             <p className="text-xs text-slate-400">
-                                Bienvenido, <span className="text-indigo-400 font-medium">{clientDisplayName}</span>
+                                Bienvenido, <span className="text-indigo-400 font-medium break-words">{clientDisplayName}</span>
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={handleLogoutClick}
-                        className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-sm font-semibold rounded-2xl border border-slate-700/60 transition-all duration-300 cursor-pointer"
+                        className="shrink-0 px-4 py-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-sm font-semibold rounded-2xl border border-slate-700/60 transition-all duration-300 cursor-pointer"
                     >
                         Salir
                     </button>
                 </header>
 
                 {/* Contenido Principal */}
-                <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-8">
-                    <div className="border-b border-slate-800/80 pb-4 flex items-center justify-between">
+                <div className="min-w-0 bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl p-4 sm:p-8 space-y-8">
+                    <div className="min-w-0 border-b border-slate-800/80 pb-4 flex flex-wrap items-center justify-between gap-2">
                         <h2 className="text-base sm:text-lg font-bold text-white">Estado de Cuenta Actual</h2>
                         {!loading && myLoan && (
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
