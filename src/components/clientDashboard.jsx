@@ -1,22 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { getAuth, signOut } from 'firebase/auth';
 import { API_URL } from '../services/api';
+import { getFreshToken } from '../services/auth';
+import { formatDate, toDate } from '../utils/loanDates';
 
 export default function ClientDashboard({ user: initialUser, token, onLogout }) {
     const [user, setUser] = useState(initialUser);
     const [myLoan, setMyLoan] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [payments, setPayments] = useState([]);
 
-    const getValidToken = async () => {
-        if (token) return token;
-        const auth = getAuth();
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-            return await currentUser.getIdToken();
-        }
-        return null;
-    };
+    const getValidToken = () => getFreshToken(token);
 
     useEffect(() => {
         fetchMyLoanData();
@@ -38,6 +33,16 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
             if (!response.ok) throw new Error(data.message || 'Error al cargar tu información financiera');
 
             setMyLoan(data);
+
+            // El historial es secundario: si falla, el resto del portal sigue funcionando
+            try {
+                const paymentsResponse = await fetch(`${API_URL}/api/loans/my-loan/payments`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                if (paymentsResponse.ok) setPayments(await paymentsResponse.json());
+            } catch (paymentsErr) {
+                console.error('No se pudo cargar el historial de pagos', paymentsErr);
+            }
         } catch (err) {
             console.error(err);
             setError('No se pudo cargar la información de tu préstamo.');
@@ -65,13 +70,15 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
     const totalDebt = Number(myLoan?.totalDebt) || 0;
     const remainingDebt = Number(myLoan?.remainingDebt) || 0;
     const interestRate = Number(myLoan?.interestRate) || 0;
-    
-    // Cálculo con interés: Capital Total * (1 + Interés / 100)
-    const totalWithInterest = totalDebt * (1 + interestRate / 100);
+    const installments = Array.isArray(myLoan?.installments) ? myLoan.installments : [];
+    const totalWithInterest = Number(myLoan?.totalWithInterest) ||
+        installments.reduce((total, installment) => total + Number(installment.amountDue || 0), 0) ||
+        totalDebt * (1 + interestRate / 100);
+    const nextInstallment = installments.find((installment) => installment.status !== 'paid');
     
     // Progreso pagado en porcentaje
-    const paidAmount = Math.max(0, totalDebt - remainingDebt);
-    const progressPercentage = totalDebt > 0 ? Math.min(100, Math.round((paidAmount / totalDebt) * 100)) : 0;
+    const paidAmount = Math.max(0, totalWithInterest - remainingDebt);
+    const progressPercentage = totalWithInterest > 0 ? Math.min(100, Math.round((paidAmount / totalWithInterest) * 100)) : 0;
 
     return (
         <div className="relative min-h-screen bg-slate-950 overflow-hidden font-sans text-slate-100 p-4 sm:p-8 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
@@ -172,12 +179,12 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
                                         ${totalWithInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </h4>
                                     <p className="text-xs text-slate-400 mt-0.5">
-                                        Calculado con un <span className="text-indigo-400 font-semibold">{interestRate}%</span> de interés sobre un capital de ${totalDebt.toLocaleString()}.
+                                        Interés del <span className="text-indigo-400 font-semibold">{interestRate}%</span> aplicado en cada cuota sobre el capital inicial.
                                     </p>
                                 </div>
                                 <div className="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-center">
                                     <span className="block text-[10px] uppercase font-bold text-slate-400">Frecuencia</span>
-                                    <span className="text-sm font-bold text-indigo-300">{myLoan.frequency}</span>
+                                    <span className="text-sm font-bold text-indigo-300">{myLoan.frequency} · {myLoan.numberOfInstallments || installments.length} cuotas</span>
                                 </div>
                             </div>
 
@@ -189,8 +196,26 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
                                     </div>
                                     <div>
                                         <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Monto de Cuota</span>
-                                        <span className="text-lg font-bold text-white">${Number(myLoan.installmentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        <span className="text-lg font-bold text-white">${Number(nextInstallment?.amountDue || myLoan.installmentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        {nextInstallment && <span className="block text-xs text-slate-400">Cuota {nextInstallment.installmentNumber}: capital ${Number(nextInstallment.principalAmount || 0).toLocaleString()} + interés ${Number(nextInstallment.interestAmount || 0).toLocaleString()}</span>}
                                     </div>
+
+                                    {installments.length > 0 && (
+                                        <div className="bg-slate-950/50 border border-slate-800/80 p-5 rounded-2xl">
+                                            <h4 className="text-sm font-bold text-white mb-4">Detalle de cuotas</h4>
+                                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                {installments.map((installment) => (
+                                                    <div key={installment.installmentNumber} className="flex items-center justify-between gap-3 text-xs border-b border-slate-800/60 pb-2">
+                                                        <span className="text-slate-400">Cuota {installment.installmentNumber} · {formatDate(toDate(installment.dueDate))}</span>
+                                                        <span className="text-slate-300">${Number(installment.amountDue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                        <span className={installment.status === 'paid' ? 'text-emerald-400' : 'text-amber-400'}>
+                                                            {installment.status === 'paid' ? 'Pagada' : `Pendiente · interés $${Number(installment.interestAmount || 0).toLocaleString()}`}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="bg-slate-950/50 border border-slate-800/80 p-5 rounded-2xl flex items-center space-x-4">
                                     <div className="w-10 h-10 rounded-xl bg-cyan-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">
@@ -202,6 +227,21 @@ export default function ClientDashboard({ user: initialUser, token, onLogout }) 
                                     </div>
                                 </div>
                             </div>
+
+                            {payments.length > 0 && (
+                                <div className="bg-slate-950/50 border border-slate-800/80 p-5 rounded-2xl">
+                                    <h4 className="text-sm font-bold text-white mb-4">Mis pagos</h4>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {payments.map((payment) => (
+                                            <div key={payment.id} className="flex items-center justify-between gap-3 text-xs border-b border-slate-800/60 pb-2">
+                                                <span className="text-slate-400">{formatDate(toDate(payment.createdAt))}</span>
+                                                <span className="font-semibold text-emerald-400">+${Number(payment.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                <span className="text-slate-400">Quedaba ${Number(payment.remainingDebtAfter || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                         </div>
                     )}

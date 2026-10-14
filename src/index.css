@@ -30,3 +30,19 @@ video,
 canvas {
   max-width: 100%;
 }
+
+/* Móvil: 16px en los campos evita el zoom automático de iOS al enfocarlos */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Sin el retardo de doble toque en botones y enlaces */
+button,
+a,
+select {
+  touch-action: manipulation;
+}

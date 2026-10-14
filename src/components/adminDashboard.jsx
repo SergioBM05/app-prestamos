@@ -1,6 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { getAuth, signOut } from 'firebase/auth';
 import { API_URL } from '../services/api';
+import { getFreshToken } from '../services/auth';
+import { NEAR_DUE_DAYS, DUE_TONES, formatDate, toDate, isLoanPaid, getLoanDates, getDueInfo } from '../utils/loanDates';
+
+// Inicio, próximo pago (con color del semáforo) y fin del préstamo
+function LoanDates({ loan, className = '' }) {
+    const { start, end } = getLoanDates(loan);
+    const due = getDueInfo(loan);
+    return (
+        <div className={className}>
+            <div className="flex gap-1.5"><span className="w-20 shrink-0 text-slate-500">Inicio</span><span className="text-slate-300">{formatDate(start)}</span></div>
+            <div className="flex gap-1.5">
+                <span className="w-20 shrink-0 text-slate-500">Próx. pago</span>
+                {due ? (
+                    <span className={`font-semibold ${due.level === 'overdue' ? 'text-rose-400' : due.level === 'soon' ? 'text-amber-300' : 'text-emerald-400'}`}>
+                        {formatDate(due.due)} · {due.label}
+                    </span>
+                ) : <span className="text-slate-300">—</span>}
+            </div>
+            <div className="flex gap-1.5"><span className="w-20 shrink-0 text-slate-500">Fin</span><span className="text-slate-300">{formatDate(end)}</span></div>
+        </div>
+    );
+}
+
+// Interés fijo por cuota sobre el capital inicial; la cuota se reparte en interés + capital.
+const getLoanPlan = (totalDebt, interestRate, installmentAmount) => {
+    const debt = Number(totalDebt) || 0;
+    const payment = Number(installmentAmount) || 0;
+    const interestPerInstallment = debt * ((Number(interestRate) || 0) / 100);
+    const principalPerInstallment = payment - interestPerInstallment;
+    if (debt <= 0 || payment <= 0 || principalPerInstallment <= 0) return null;
+    const installments = Math.ceil(debt / principalPerInstallment - 1e-9);
+    return {
+        installments,
+        interestPerInstallment,
+        total: debt + interestPerInstallment * installments
+    };
+};
 
 export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [user, setUser] = useState(initialUser);
@@ -33,7 +70,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         totalDebt: '',
         interestRate: '',
         frequency: 'Mensual',
-        installmentAmount: ''
+        installmentAmount: '',
+        numberOfInstallments: ''
     });
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState('');
@@ -42,16 +80,14 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [completeError, setCompleteError] = useState('');
     const [completeSuccessMessage, setCompleteSuccessMessage] = useState(null);
     const [copiedCredential, setCopiedCredential] = useState('');
+    const [activeTab, setActiveTab] = useState('active');
+    // Historial de pagos de un préstamo
+    const [historyLoan, setHistoryLoan] = useState(null);
+    const [historyItems, setHistoryItems] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState('');
 
-    const getValidToken = async () => {
-        if (token) return token;
-        const auth = getAuth();
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-            return await currentUser.getIdToken();
-        }
-        return null;
-    };
+    const getValidToken = () => getFreshToken(token);
 
     useEffect(() => {
         fetchUserData();
@@ -120,7 +156,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '',duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
+        setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '' });
         setIsModalOpen(true);
     };
 
@@ -129,11 +165,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         setFormError('');
         setFormData({
             clientName: loan.clientName || '',
-            duenyoDinero: loan.duenyoDinero|| '',
+            duenyoDinero: loan.duenyoDinero || '',
             totalDebt: loan.totalDebt || '',
             interestRate: loan.interestRate || '',
             frequency: loan.frequency || 'Mensual',
-            installmentAmount: loan.installmentAmount || ''
+            installmentAmount: loan.installmentAmount || '',
+            numberOfInstallments: loan.numberOfInstallments || loan.installments?.length || ''
         });
         setIsModalOpen(true);
     };
@@ -151,13 +188,25 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
             const method = editingLoan ? 'PUT' : 'POST';
 
+            const totalDebt = Number(formData.totalDebt) || 0;
+            const interestRate = Number(formData.interestRate) || 0;
+            const installmentAmount = Number(formData.installmentAmount) || 0;
+            if (!getLoanPlan(totalDebt, interestRate, installmentAmount)) {
+                throw new Error('La cuota debe ser mayor que el interés por cuota');
+            }
+
             const response = await fetch(url, {
                 method: method,
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${currentToken}`
                 },
-                body: JSON.stringify(formData)
+                body: JSON.stringify({
+                    ...formData,
+                    totalDebt,
+                    interestRate,
+                    installmentAmount
+                })
             });
 
             const data = await response.json();
@@ -170,7 +219,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 });
             }
 
-            setFormData({ clientName: '',duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '' });
+            setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '' });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -273,6 +322,27 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         }
     };
 
+    const handleOpenHistory = async (loan) => {
+        setHistoryLoan(loan);
+        setHistoryItems([]);
+        setHistoryError('');
+        setHistoryLoading(true);
+        try {
+            const currentToken = await getValidToken();
+            const response = await fetch(`${API_URL}/api/loans/${loan.id}/payments`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Error al cargar el historial');
+            setHistoryItems(data);
+        } catch (err) {
+            console.error(err);
+            setHistoryError(err.message);
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
     // Abrir modal de pago parcial
     const handleOpenPaymentModal = (loan) => {
         setSelectedLoanForPayment(loan);
@@ -328,7 +398,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     // Función para enviar recordatorio automatizado por WhatsApp según la frecuencia
     const sendWhatsAppReminder = (loan) => {
         const remaining = Number(loan.remainingDebt || 0);
-        const installment = Number(loan.installmentAmount || 0);
+        const nextInstallment = loan.installments?.find((item) => item.status !== 'paid');
+        const installment = Number(nextInstallment?.amountDue || loan.installmentAmount || 0);
         const frequencyText = loan.frequency ? loan.frequency.toLowerCase() : 'periódica';
 
         const message = `Hola *${loan.clientName}*, te saludamos de la administración financiera. Te recordamos que tienes un pago pendiente de cuota (${frequencyText}) por un monto de *$${installment.toLocaleString()}*. Tu deuda restante actual es de *$${remaining.toLocaleString()}*. Por favor, realiza tu abono a la brevedad posible. ¡Gracias!`;
@@ -338,8 +409,13 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     };
 
     const formatCurrency = (value) => Math.round(Number(value) || 0).toLocaleString();
-    const totalDebtSum = loans.reduce((acc, loan) => acc + (Number(loan.remainingDebt) || 0), 0);
-    const activeClientsCount = loans.length;
+    const activeLoans = loans.filter((loan) => !isLoanPaid(loan));
+    const paidLoans = loans.filter(isLoanPaid);
+    const trackedLoans = activeLoans
+        .map((loan) => ({ loan, due: getDueInfo(loan) }))
+        .sort((a, b) => (a.due?.days ?? Infinity) - (b.due?.days ?? Infinity));
+    const totalDebtSum = activeLoans.reduce((acc, loan) => acc + (Number(loan.remainingDebt) || 0), 0);
+    const activeClientsCount = activeLoans.length;
 
     return (
         <div className="relative min-h-screen bg-slate-950 overflow-hidden font-sans text-slate-100 p-4 sm:p-8 selection:bg-indigo-500 selection:text-white">
@@ -397,12 +473,35 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     </div>
                 </div>
 
+                {/* Selector de lista */}
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap" role="tablist">
+                    {[
+                        { key: 'active', label: 'Préstamos activos', short: 'Activos', count: activeLoans.length },
+                        { key: 'tracking', label: 'Seguimiento de pagos', short: 'Seguimiento', count: trackedLoans.length },
+                        { key: 'paid', label: 'Pagados', short: 'Pagados', count: paidLoans.length }
+                    ].map((tab) => (
+                        <button
+                            key={tab.key}
+                            role="tab"
+                            aria-selected={activeTab === tab.key}
+                            onClick={() => setActiveTab(tab.key)}
+                            className={`min-h-12 px-2 sm:px-4 py-2.5 rounded-2xl border text-xs sm:text-sm font-semibold transition-all cursor-pointer ${activeTab === tab.key
+                                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 border-transparent text-white shadow-lg shadow-indigo-600/30'
+                                : 'bg-slate-900/70 border-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800/80'
+                                }`}
+                        >
+                            <span className="sm:hidden">{tab.short}</span><span className="hidden sm:inline">{tab.label}</span>
+                            <span className="block sm:inline sm:ml-1 text-xs opacity-75">({tab.count})</span>
+                        </button>
+                    ))}
+                </div>
+
                 {/* Tabla de Clientes / Préstamos con Proyecciones e Intereses */}
-                <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden animate-[fadeIn_1s_ease-out_0.4s_both]">
+                {activeTab === 'active' && <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden animate-[fadeIn_1s_ease-out_0.4s_both]">
                     <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
                         <h2 className="text-lg font-bold text-white">Listado de Clientes y Préstamos</h2>
                         <span className="text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
-                            {loans.length} registros
+                            {activeLoans.length} activos
                         </span>
                     </div>
 
@@ -418,9 +517,11 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                         <div className="p-12 text-center text-rose-400 text-sm">
                             {error}
                         </div>
-                    ) : loans.length === 0 ? (
+                    ) : activeLoans.length === 0 ? (
                         <div className="p-12 text-center text-slate-500 text-sm">
-                            No hay préstamos registrados todavía. ¡Crea el primero arriba!
+                            {loans.length === 0
+                                ? 'No hay préstamos registrados todavía. ¡Crea el primero arriba!'
+                                : 'No hay préstamos activos. Todos están pagados.'}
                         </div>
                     ) : (
                         <>
@@ -437,10 +538,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60 text-sm">
-                                        {loans.map((loan) => {
+                                        {activeLoans.map((loan) => {
                                             const totalDebt = Number(loan.totalDebt) || 0;
                                             const interestRate = Number(loan.interestRate) || 0;
-                                            const totalWithInterest = totalDebt * (1 + interestRate / 100);
+                                            const totalWithInterest = Number(loan.totalWithInterest) ||
+                                                (loan.installments || []).reduce((sum, installment) => sum + Number(installment.amountDue || 0), 0) ||
+                                                totalDebt * (1 + interestRate / 100);
                                             const remaining = Number(loan.remainingDebt) || 0;
                                             const paidSoFar = Math.max(0, totalDebt - remaining);
 
@@ -463,12 +566,15 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                     <td className="py-4 px-6">
                                                         <div className="text-slate-200 font-semibold">${formatCurrency(totalWithInterest)}</div>
                                                         <span className="text-[11px] text-indigo-300/80">
-                                                            Base: ${formatCurrency(totalDebt)} ({interestRate}% int.)
+                                                            Base: ${formatCurrency(totalDebt)} ({interestRate}% por cuota)
                                                         </span>
                                                     </td>
                                                     <td className="py-4 px-6 text-slate-300">
                                                         <div className="font-medium">{loan.frequency}</div>
-                                                        <span className="text-[11px] text-slate-400">Cuota: ${formatCurrency(loan.installmentAmount)}</span>
+                                                        <span className="text-[11px] text-slate-400">
+                                                            {loan.numberOfInstallments || loan.installments?.length || 0} cuotas · Siguiente: ${formatCurrency(loan.installments?.find((item) => item.status !== 'paid')?.amountDue || loan.installmentAmount)}
+                                                        </span>
+                                                        <LoanDates loan={loan} className="mt-1.5 space-y-0.5 text-[11px]" />
                                                     </td>
                                                     <td className="py-4 px-6">
                                                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${loan.status === 'Pagado'
@@ -497,13 +603,20 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                                 </button>
                                                                 <button
                                                                     onClick={() => handleCompleteLoan(loan)}
-                                                                    title="Dar por terminado"
+                                                                    title="Dar por Pagado"
                                                                     className="px-2.5 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                                                                 >
-                                                                    ✓ Terminar
+                                                                    ✓ Pagado
                                                                 </button>
                                                             </>
                                                         )}
+                                                        <button
+                                                            onClick={() => handleOpenHistory(loan)}
+                                                            title="Ver historial de pagos"
+                                                            className="px-2.5 py-1.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 border border-slate-600/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                        >
+                                                            🧾 Historial
+                                                        </button>
                                                         <button
                                                             onClick={() => handleOpenEditModal(loan)}
                                                             className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
@@ -524,10 +637,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </table>
                             </div>
                             <div className="grid gap-4 p-4 md:hidden">
-                                {loans.map((loan) => {
+                                {activeLoans.map((loan) => {
                                     const totalDebt = Number(loan.totalDebt) || 0;
                                     const interestRate = Number(loan.interestRate) || 0;
-                                    const totalWithInterest = totalDebt * (1 + interestRate / 100);
+                                    const totalWithInterest = Number(loan.totalWithInterest) ||
+                                        (loan.installments || []).reduce((sum, installment) => sum + Number(installment.amountDue || 0), 0) ||
+                                        totalDebt * (1 + interestRate / 100);
                                     const remaining = Number(loan.remainingDebt) || 0;
                                     const paidSoFar = Math.max(0, totalDebt - remaining);
 
@@ -539,7 +654,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                     <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
                                                         Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                     </p>
-                                                    <p className="mt-1 text-xs text-slate-400">{loan.frequency} · Cuota: ${formatCurrency(loan.installmentAmount)}</p>
+                                                    <p className="mt-1 text-xs text-slate-400">{loan.frequency} · {loan.numberOfInstallments || loan.installments?.length || 0} cuotas · Siguiente: ${formatCurrency(loan.installments?.find((item) => item.status !== 'paid')?.amountDue || loan.installmentAmount)}</p>
+                                                    <LoanDates loan={loan} className="mt-2 space-y-0.5 text-[11px]" />
                                                 </div>
                                                 <span className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${loan.status === 'Pagado'
                                                     ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
@@ -598,6 +714,13 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                 )}
                                                 <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-800/80 pt-3">
                                                     <button
+                                                        onClick={() => handleOpenHistory(loan)}
+                                                        aria-label={`Historial de pagos de ${loan.clientName}`}
+                                                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-600/40 bg-slate-700/30 text-base transition-all hover:bg-slate-700/50 active:scale-[0.98]"
+                                                    >
+                                                        🧾
+                                                    </button>
+                                                    <button
                                                         onClick={() => handleOpenEditModal(loan)}
                                                         className="min-h-11 flex-1 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 transition-all hover:bg-indigo-500/20 active:scale-[0.98]"
                                                     >
@@ -618,16 +741,154 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             </div>
                         </>
                     )}
-                </div>
+                </div>}
+
+                {/* Seguimiento de fechas de pago (semáforo) */}
+                {activeTab === 'tracking' && <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden">
+                    <div className="p-6 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-white">Seguimiento de Pagos</h2>
+                            <p className="mt-1 text-xs text-slate-400">Ordenado por la fecha de pago más próxima</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                            <span className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${DUE_TONES.overdue.dot}`}></span>Vencida</span>
+                            <span className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${DUE_TONES.soon.dot}`}></span>Cerca (≤ {NEAR_DUE_DAYS} días)</span>
+                            <span className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${DUE_TONES.ok.dot}`}></span>Con margen</span>
+                        </div>
+                    </div>
+                    {trackedLoans.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-sm">No hay clientes con pagos pendientes.</div>
+                    ) : (
+                        <ul className="grid gap-3 p-4">
+                            {trackedLoans.map(({ loan, due }) => (
+                                <li
+                                    key={loan.id}
+                                    className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${due ? due.tone.row : 'border-slate-800/80 bg-slate-950/50'}`}
+                                >
+                                    <div className="min-w-0">
+                                        <p className="truncate font-semibold text-white">{loan.clientName}</p>
+                                        <p className="mt-0.5 text-[11px] text-slate-400">
+                                            Deuda restante ${formatCurrency(loan.remainingDebt)} · Fin previsto {formatDate(getLoanDates(loan).end)}
+                                        </p>
+                                    </div>
+                                    {due ? (
+                                        <div className="w-full sm:w-auto sm:text-right">
+                                            <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${due.tone.badge}`}>
+                                                {due.label}
+                                            </span>
+                                            <p className="mt-1 text-[11px] text-slate-400">
+                                                Cuota {due.next.installmentNumber} · {formatDate(due.due)} · ${formatCurrency(Number(due.next.amountDue || 0) - Number(due.next.paidAmount || 0))}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-slate-500">Sin calendario de cuotas</span>
+                                    )}
+                                    <button
+                                        onClick={() => handleOpenPaymentModal(loan)}
+                                        className="min-h-11 w-full sm:w-auto px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-200 border border-indigo-500/30 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
+                                    >
+                                        💵 Abonar
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>}
+
+                {/* Préstamos pagados por completo */}
+                {activeTab === 'paid' && <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden">
+                    <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
+                        <h2 className="text-lg font-bold text-white">Préstamos Pagados</h2>
+                        <span className="text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
+                            {paidLoans.length} pagados
+                        </span>
+                    </div>
+                    {paidLoans.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-sm">Todavía no hay préstamos pagados.</div>
+                    ) : (
+                        <ul className="grid gap-3 p-4">
+                            {paidLoans.map((loan) => {
+                                const dates = getLoanDates(loan);
+                                const totalPaid = Number(loan.totalWithInterest) ||
+                                    (loan.installments || []).reduce((sum, item) => sum + Number(item.amountDue || 0), 0) ||
+                                    Number(loan.totalDebt) || 0;
+                                return (
+                                    <li key={loan.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/50 px-4 py-3">
+                                        <div className="min-w-0">
+                                            <p className="truncate font-semibold text-white">{loan.clientName}</p>
+                                            <p className="mt-0.5 text-[11px] text-slate-400">
+                                                {formatDate(dates.start)} → {formatDate(dates.end)} · Total ${formatCurrency(totalPaid)}
+                                            </p>
+                                        </div>
+                                        <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end gap-2">
+                                            <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400">
+                                                Pagado
+                                            </span>
+                                            <button
+                                                onClick={() => handleOpenDeleteModal(loan)}
+                                                aria-label={`Eliminar préstamo de ${loan.clientName}`}
+                                                className="min-h-11 px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                            >
+                                                Eliminar
+                                            </button>
+                                        </div>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )}
+                </div>}
 
             </div>
 
+            {/* Modal de historial de pagos */}
+            {historyLoan && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6">
+                    <div className="relative my-auto w-full max-w-lg bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-white">Historial de pagos</h3>
+                                <p className="text-xs text-slate-400">{historyLoan.clientName}</p>
+                            </div>
+                            <button
+                                onClick={() => setHistoryLoan(null)}
+                                className="px-3 py-2 bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-sm font-semibold rounded-xl border border-slate-700/60 cursor-pointer"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                        {historyLoading ? (
+                            <p className="py-6 text-center text-sm text-slate-500">Cargando historial...</p>
+                        ) : historyError ? (
+                            <p className="py-6 text-center text-sm text-rose-400">{historyError}</p>
+                        ) : historyItems.length === 0 ? (
+                            <p className="py-6 text-center text-sm text-slate-500">Todavía no hay pagos registrados.</p>
+                        ) : (
+                            <ul className="max-h-80 space-y-2 overflow-y-auto">
+                                {historyItems.map((item) => (
+                                    <li key={item.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/50 px-4 py-3 text-sm">
+                                        <div>
+                                            <p className="font-semibold text-emerald-400">+${formatCurrency(item.amount)}</p>
+                                            <p className="text-[11px] text-slate-400">
+                                                {formatDate(toDate(item.createdAt))}
+                                                {item.installmentNumbers?.length > 0 && ` · Cuota${item.installmentNumbers.length > 1 ? 's' : ''} ${item.installmentNumbers.join(', ')}`}
+                                            </p>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400">Quedaba ${formatCurrency(item.remainingDebtAfter)}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Modal para Crear / Editar Préstamo */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
                     <div className="absolute w-72 h-72 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-                    <div className="relative w-full max-w-xl bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
+                    <div className="relative my-auto w-full max-w-xl bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
 
                         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
                             <div className="flex items-center space-x-3">
@@ -676,13 +937,19 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
                                     Dueño del dinero
                                 </label>
-                                <input
-                                    type="text"
+                                <select
                                     required
                                     value={formData.duenyoDinero}
                                     onChange={(e) => setFormData({ ...formData, duenyoDinero: e.target.value })}
-                                    className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
-                                />
+                                    className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 cursor-pointer"
+                                >
+                                    <option value="" disabled className="bg-slate-900 text-slate-500">
+                                        Selecciona un dueño
+                                    </option>
+                                    <option value="Carlos Insuasty">Carlos Insuasty</option>
+                                    <option value="Piedad chamorro">Piedad chamorro</option>
+
+                                </select>
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -714,18 +981,22 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
-                                        Monto de Cuota ($)
+                                        Pago por Cuota ($)
                                     </label>
                                     <input
                                         type="number"
+                                        required
+                                        min="0.01"
+                                        step="0.01"
                                         value={formData.installmentAmount}
                                         onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value })}
-                                        placeholder="0.00"
+                                        placeholder="Ej. 300"
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
+                                    <p className="mt-1.5 text-[10px] text-slate-500">Incluye el interés de cada cuota</p>
                                 </div>
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
@@ -741,6 +1012,31 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         <option value="Quincenal" className="bg-slate-900 text-white">Quincenal</option>
                                         <option value="Mensual" className="bg-slate-900 text-white">Mensual</option>
                                     </select>
+                                    <p className="mt-1.5 text-[10px] text-slate-500">Cada cuánto vence una cuota</p>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                        Total a pagar ($)
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-400 font-semibold">$</span>
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={(() => {
+                                                const plan = getLoanPlan(formData.totalDebt, formData.interestRate, formData.installmentAmount);
+                                                return plan ? plan.total.toFixed(2) : '';
+                                            })()}
+                                            placeholder="Se calcula solo"
+                                            className="w-full pl-9 pr-4 py-3.5 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl text-sm font-semibold text-indigo-200 placeholder-indigo-300/40 focus:outline-none"
+                                        />
+                                    </div>
+                                    <p className="mt-1.5 text-[10px] text-indigo-300/70">
+                                        {(() => {
+                                            const plan = getLoanPlan(formData.totalDebt, formData.interestRate, formData.installmentAmount);
+                                            return plan ? `${plan.installments} cuotas · interés $${plan.interestPerInstallment.toFixed(2)} por cuota` : 'Capital más interés de todas las cuotas';
+                                        })()}
+                                    </p>
                                 </div>
                             </div>
 
@@ -768,10 +1064,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
             {/* Modal de Credenciales Creadas */}
             {newCredentials && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
                     <div className="absolute w-80 h-80 bg-emerald-600/10 rounded-full blur-[120px] pointer-events-none"></div>
 
-                    <div className="relative w-full max-w-md bg-slate-900/95 border border-emerald-500/30 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl animate-[fadeIn_0.35s_cubic-bezier(0.16,1,0.3,1)]">
+                    <div className="relative my-auto w-full max-w-md bg-slate-900/95 border border-emerald-500/30 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl animate-[fadeIn_0.35s_cubic-bezier(0.16,1,0.3,1)]">
 
                         <div className="text-center space-y-2">
                             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white shadow-lg shadow-emerald-500/30 mb-1">
@@ -835,10 +1131,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
             {/* Modal para Registrar Abono / Pago Parcial */}
             {isPaymentModalOpen && selectedLoanForPayment && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
                     <div className="absolute w-72 h-72 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-                    <div className="relative w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
+                    <div className="relative my-auto w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
 
                         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
                             <div className="flex items-center space-x-3">
@@ -892,6 +1188,33 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     placeholder="Ej. 50.00"
                                     className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
+                                {(() => {
+                                    const next = (selectedLoanForPayment.installments || []).find((item) => item.status !== 'paid');
+                                    const dueNow = next ? Math.max(0, Number(next.amountDue || 0) - Number(next.paidAmount || 0)) : 0;
+                                    const remainingAll = Number(selectedLoanForPayment.remainingDebt) || 0;
+                                    return (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {dueNow > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAmountPaid(dueNow.toFixed(2))}
+                                                    className="min-h-11 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-200 border border-indigo-500/30 rounded-xl text-xs font-semibold cursor-pointer"
+                                                >
+                                                    Cuota {next.installmentNumber}: ${dueNow.toFixed(2)}
+                                                </button>
+                                            )}
+                                            {remainingAll > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAmountPaid(remainingAll.toFixed(2))}
+                                                    className="min-h-11 px-3 py-2 bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-xl text-xs font-semibold cursor-pointer"
+                                                >
+                                                    Liquidar todo: ${remainingAll.toFixed(2)}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800/80">
@@ -917,10 +1240,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             )}
             {/* Modal de Confirmación de Eliminación Personalizado */}
             {isDeleteModalOpen && loanToDelete && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
                     <div className="absolute w-72 h-72 bg-rose-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-                    <div className="relative w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
+                    <div className="relative my-auto w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
 
                         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
                             <div className="flex items-center space-x-3">
@@ -983,17 +1306,17 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             )}
 
             {loanToComplete && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
                     <div className="absolute w-72 h-72 bg-teal-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-                    <div className="relative w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
+                    <div className="relative my-auto w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-6 backdrop-blur-2xl">
                         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
                             <div className="flex items-center space-x-3">
                                 <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-600 to-cyan-400 flex items-center justify-center text-white shadow-md shadow-teal-500/20">
                                     ✓
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-bold text-white tracking-tight">Terminar préstamo</h3>
+                                    <h3 className="text-lg font-bold text-white tracking-tight">Préstamo pagado</h3>
                                     <p className="text-xs text-slate-400">Marcar la deuda como pagada</p>
                                 </div>
                             </div>
