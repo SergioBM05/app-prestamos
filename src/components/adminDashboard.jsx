@@ -525,12 +525,14 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 {/* Cabecera del Panel */}
                 <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl animate-[fadeIn_0.6s_ease-out_forwards]">
                     <div className="flex items-center space-x-4">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-400 text-white shadow-lg shadow-indigo-500/30">
-                            💳
-                        </div>
+                        <img
+                            src="/logo.svg"
+                            alt="Gestor de Préstamos"
+                            className="w-12 h-12 shrink-0 rounded-2xl shadow-lg shadow-indigo-500/30"
+                        />
                         <div>
                             <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                                MicrocreditosMarca
+                                Microcreditos Marca
                             </h1>
                             <p className="text-xs sm:text-sm text-slate-400">
                                 Bienvenido, <span className="text-indigo-400 font-medium">{user?.username || user?.name || 'Admin'}</span>

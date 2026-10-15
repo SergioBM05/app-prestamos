@@ -57,13 +57,11 @@ export default function Login({ onLoginSuccess }) {
         
         {/* Cabecera con animación en cascada */}
         <div className="text-center mb-8 animate-[slideDown_0.6s_ease-out_0.2s_both]">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 text-white shadow-xl shadow-indigo-500/30 mb-5 relative group">
-            {/* Brillo interno animado en el icono */}
-            <div className="absolute inset-0 rounded-2xl bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <svg className="w-8 h-8 transform transition-transform duration-500 group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-            </svg>
-          </div>
+          <img
+            src="/logo.svg"
+            alt="Gestor de Préstamos"
+            className="mx-auto mb-5 w-16 h-16 rounded-2xl shadow-xl shadow-indigo-500/30 transition-transform duration-500 hover:scale-110"
+          />
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
             Plataforma de Gestión Financiera
           </h2>
