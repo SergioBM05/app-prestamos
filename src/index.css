@@ -46,3 +46,10 @@ a,
 select {
   touch-action: manipulation;
 }
+
+/* Campos bloqueados (p. ej. préstamo con pagos registrados) */
+input:disabled,
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

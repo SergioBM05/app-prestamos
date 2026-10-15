@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getAuth, signOut } from 'firebase/auth';
 import { API_URL } from '../services/api';
 import { getFreshToken } from '../services/auth';
+import { getLoanPlan, toInputDate } from '../utils/loanPlan';
 import { NEAR_DUE_DAYS, DUE_TONES, formatDate, toDate, isLoanPaid, getLoanDates, getDueInfo } from '../utils/loanDates';
 
 // Inicio, próximo pago (con color del semáforo) y fin del préstamo
@@ -23,21 +24,6 @@ function LoanDates({ loan, className = '' }) {
         </div>
     );
 }
-
-// Interés fijo por cuota sobre el capital inicial; la cuota se reparte en interés + capital.
-const getLoanPlan = (totalDebt, interestRate, installmentAmount) => {
-    const debt = Number(totalDebt) || 0;
-    const payment = Number(installmentAmount) || 0;
-    const interestPerInstallment = debt * ((Number(interestRate) || 0) / 100);
-    const principalPerInstallment = payment - interestPerInstallment;
-    if (debt <= 0 || payment <= 0 || principalPerInstallment <= 0) return null;
-    const installments = Math.ceil(debt / principalPerInstallment - 1e-9);
-    return {
-        installments,
-        interestPerInstallment,
-        total: debt + interestPerInstallment * installments
-    };
-};
 
 export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [user, setUser] = useState(initialUser);
@@ -71,8 +57,22 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         interestRate: '',
         frequency: 'Mensual',
         installmentAmount: '',
-        numberOfInstallments: ''
+        numberOfInstallments: '',
+        startDate: '',
+        endDate: '',
+        // Qué campo manda: 'installments' (nº de cuotas) o 'amount' (pago por cuota); el otro se calcula
+        calcMode: 'installments'
     });
+    // Estadísticas de ganancias (interés cobrado y pendiente)
+    const [profit, setProfit] = useState(null);
+    const [profitLoading, setProfitLoading] = useState(false);
+    const [profitError, setProfitError] = useState('');
+    // Saldo en caja (editable): sube con los cobros y baja con los préstamos nuevos
+    const [cashBalance, setCashBalance] = useState(null);
+    const [isEditingCash, setIsEditingCash] = useState(false);
+    const [cashInput, setCashInput] = useState('');
+    const [savingCash, setSavingCash] = useState(false);
+    const [cashError, setCashError] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState('');
     const [loanToComplete, setLoanToComplete] = useState(null);
@@ -93,6 +93,75 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         fetchUserData();
         fetchLoans();
     }, []);
+
+    const fetchProfit = async () => {
+        try {
+            setProfitLoading(true);
+            setProfitError('');
+            const currentToken = await getValidToken();
+            const response = await fetch(`${API_URL}/api/stats/profit`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'No se pudieron cargar las ganancias');
+            setProfit(data);
+        } catch (err) {
+            console.error(err);
+            setProfitError(err.message);
+        } finally {
+            setProfitLoading(false);
+        }
+    };
+
+    // Al abrir la pestaña (y cada vez que cambian los préstamos) se recalculan las ganancias
+    useEffect(() => {
+        if (activeTab === 'profit') fetchProfit();
+    }, [activeTab, loans]);
+
+    const fetchCash = async () => {
+        try {
+            const currentToken = await getValidToken();
+            if (!currentToken) return;
+            const response = await fetch(`${API_URL}/api/cashbox`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const data = await response.json();
+            if (response.ok) setCashBalance(Number(data.balance) || 0);
+        } catch (err) {
+            console.error('No se pudo cargar el saldo en caja', err);
+        }
+    };
+
+    const handleStartEditCash = () => {
+        setCashInput(String(cashBalance ?? 0));
+        setCashError('');
+        setIsEditingCash(true);
+    };
+
+    const handleSaveCash = async (e) => {
+        e.preventDefault();
+        setSavingCash(true);
+        setCashError('');
+        try {
+            const currentToken = await getValidToken();
+            const response = await fetch(`${API_URL}/api/cashbox`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentToken}`
+                },
+                body: JSON.stringify({ balance: cashInput })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'No se pudo guardar el saldo');
+            setCashBalance(Number(data.balance) || 0);
+            setIsEditingCash(false);
+        } catch (err) {
+            setCashError(err.message);
+        } finally {
+            setSavingCash(false);
+        }
+    };
 
     const handleLogoutClick = async () => {
         try {
@@ -145,6 +214,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             if (!response.ok) throw new Error(data.message || 'Error al cargar los préstamos');
 
             setLoans(data);
+            fetchCash(); // el saldo cambia con cada préstamo o pago
         } catch (err) {
             console.error(err);
             setError('No se pudieron cargar los datos de los clientes.');
@@ -156,7 +226,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '' });
+        setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
         setIsModalOpen(true);
     };
 
@@ -169,11 +239,30 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             totalDebt: loan.totalDebt || '',
             interestRate: loan.interestRate || '',
             frequency: loan.frequency || 'Mensual',
-            installmentAmount: loan.installmentAmount || '',
-            numberOfInstallments: loan.numberOfInstallments || loan.installments?.length || ''
+            installmentAmount: '',
+            numberOfInstallments: loan.numberOfInstallments || loan.installments?.length || '',
+            startDate: toInputDate(getLoanDates(loan).start),
+            // Solo se rellena la fecha de fin si el préstamo se creó con una fecha de fin elegida
+            endDate: loan.endDateCustom ? toInputDate(getLoanDates(loan).end) : '',
+            calcMode: 'installments'
         });
         setIsModalOpen(true);
     };
+
+    // Datos que alimentan el cálculo según el campo que manda (nº de cuotas o pago por cuota)
+    const planInput = {
+        totalDebt: formData.totalDebt,
+        interestRate: formData.interestRate,
+        frequency: formData.frequency,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        numberOfInstallments: formData.calcMode === 'installments' ? Number(formData.numberOfInstallments) || 0 : 0,
+        installmentAmount: formData.calcMode === 'amount' ? Number(formData.installmentAmount) || 0 : 0
+    };
+    const loanPlan = getLoanPlan(planInput);
+    // Con pagos registrados el calendario es definitivo (el backend lo ignora), así que se bloquean esos campos
+    const editingLoanLocked = Boolean(editingLoan) &&
+        (loans.find((item) => item.id === editingLoan)?.installments || []).some((item) => Number(item.paidAmount) > 0);
 
     const handleSaveLoan = async (e) => {
         e.preventDefault();
@@ -190,10 +279,9 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
             const totalDebt = Number(formData.totalDebt) || 0;
             const interestRate = Number(formData.interestRate) || 0;
-            const installmentAmount = Number(formData.installmentAmount) || 0;
-            if (!getLoanPlan(totalDebt, interestRate, installmentAmount)) {
-                throw new Error('La cuota debe ser mayor que el interés por cuota');
-            }
+            const plan = getLoanPlan(planInput);
+            if (!plan) throw new Error('Indica el número de cuotas, la cuota o la fecha de fin');
+            if (plan.error) throw new Error(plan.error);
 
             const response = await fetch(url, {
                 method: method,
@@ -202,10 +290,16 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     'Authorization': `Bearer ${currentToken}`
                 },
                 body: JSON.stringify({
-                    ...formData,
+                    clientName: formData.clientName,
+                    duenyoDinero: formData.duenyoDinero,
                     totalDebt,
                     interestRate,
-                    installmentAmount
+                    frequency: formData.frequency,
+                    startDate: formData.startDate,
+                    endDate: formData.endDate,
+                    // Solo viaja el dato que manda; el backend calcula el resto
+                    numberOfInstallments: planInput.numberOfInstallments,
+                    installmentAmount: planInput.installmentAmount
                 })
             });
 
@@ -219,7 +313,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 });
             }
 
-            setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '' });
+            setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -399,16 +493,19 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const sendWhatsAppReminder = (loan) => {
         const remaining = Number(loan.remainingDebt || 0);
         const nextInstallment = loan.installments?.find((item) => item.status !== 'paid');
-        const installment = Number(nextInstallment?.amountDue || loan.installmentAmount || 0);
+        const installment = nextInstallment
+            ? Math.max(0, Number(nextInstallment.amountDue || 0) - Number(nextInstallment.paidAmount || 0))
+            : Number(loan.installmentAmount || 0);
+        const dueDate = toDate(nextInstallment?.dueDate);
         const frequencyText = loan.frequency ? loan.frequency.toLowerCase() : 'periódica';
 
-        const message = `Hola *${loan.clientName}*, te saludamos de la administración financiera. Te recordamos que tienes un pago pendiente de cuota (${frequencyText}) por un monto de *$${installment.toLocaleString()}*. Tu deuda restante actual es de *$${remaining.toLocaleString()}*. Por favor, realiza tu abono a la brevedad posible. ¡Gracias!`;
+        const message = `Hola *${loan.clientName}*, te saludamos de la administración financiera. Te recordamos que tienes un pago pendiente de cuota (${frequencyText}) por un monto de *$${installment.toLocaleString(undefined, { maximumFractionDigits: 2 })}*${dueDate ? ` con vencimiento el *${formatDate(dueDate)}*` : ''}. Tu deuda restante actual es de *$${remaining.toLocaleString(undefined, { maximumFractionDigits: 2 })}*. Por favor, realiza tu abono a la brevedad posible. ¡Gracias!`;
 
         const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(whatsappUrl, '_blank');
     };
 
-    const formatCurrency = (value) => Math.round(Number(value) || 0).toLocaleString();
+    const formatCurrency = (value) => (Math.round((Number(value) || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
     const activeLoans = loans.filter((loan) => !isLoanPaid(loan));
     const paidLoans = loans.filter(isLoanPaid);
     const trackedLoans = activeLoans
@@ -458,12 +555,63 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 </header>
 
                 {/* Tarjetas de Métricas */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                     <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-6 rounded-3xl shadow-lg animate-[fadeIn_0.8s_ease-out_0.2s_both]">
                         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Deuda Total Activa</p>
                         <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
                             ${formatCurrency(totalDebtSum)}
                         </h3>
+                    </div>
+                    <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-6 rounded-3xl shadow-lg animate-[fadeIn_0.8s_ease-out_0.25s_both]">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Saldo en Caja</p>
+                            {!isEditingCash && cashBalance !== null && (
+                                <button
+                                    onClick={handleStartEditCash}
+                                    aria-label="Editar saldo en caja"
+                                    className="min-h-9 px-2.5 text-xs font-semibold text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg cursor-pointer"
+                                >
+                                    ✎ Editar
+                                </button>
+                            )}
+                        </div>
+                        {isEditingCash ? (
+                            <form onSubmit={handleSaveCash} className="space-y-2">
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    required
+                                    autoFocus
+                                    value={cashInput}
+                                    onChange={(e) => setCashInput(e.target.value)}
+                                    className="w-full px-3 py-2.5 bg-slate-950/80 border border-slate-800/90 rounded-xl text-lg font-bold text-slate-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                {cashError && <p className="text-xs text-rose-400">{cashError}</p>}
+                                <div className="flex gap-2">
+                                    <button
+                                        type="submit"
+                                        disabled={savingCash}
+                                        className="min-h-11 flex-1 px-3 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 cursor-pointer"
+                                    >
+                                        {savingCash ? 'Guardando...' : 'Guardar'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEditingCash(false)}
+                                        className="min-h-11 px-3 py-2 bg-slate-800/80 text-slate-300 text-sm font-semibold rounded-xl border border-slate-700/60 cursor-pointer"
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
+                            </form>
+                        ) : (
+                            <>
+                                <h3 className={`text-3xl font-extrabold ${cashBalance !== null && cashBalance < 0 ? 'text-rose-400' : 'text-transparent bg-clip-text bg-gradient-to-r from-white via-emerald-200 to-emerald-400'}`}>
+                                    {cashBalance === null ? '...' : `${cashBalance < 0 ? '-' : ''}$${Math.abs(cashBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                                </h3>
+                                <p className="mt-1 text-[11px] text-slate-500">Baja con cada préstamo y sube con cada cobro</p>
+                            </>
+                        )}
                     </div>
                     <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-6 rounded-3xl shadow-lg animate-[fadeIn_0.8s_ease-out_0.3s_both]">
                         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Clientes Registrados</p>
@@ -474,11 +622,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 </div>
 
                 {/* Selector de lista */}
-                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap" role="tablist">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="tablist">
                     {[
                         { key: 'active', label: 'Préstamos activos', short: 'Activos', count: activeLoans.length },
                         { key: 'tracking', label: 'Seguimiento de pagos', short: 'Seguimiento', count: trackedLoans.length },
-                        { key: 'paid', label: 'Pagados', short: 'Pagados', count: paidLoans.length }
+                        { key: 'paid', label: 'Pagados', short: 'Pagados', count: paidLoans.length },
+                        { key: 'profit', label: 'Ganancias', short: 'Ganancias', count: null }
                     ].map((tab) => (
                         <button
                             key={tab.key}
@@ -491,7 +640,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 }`}
                         >
                             <span className="sm:hidden">{tab.short}</span><span className="hidden sm:inline">{tab.label}</span>
-                            <span className="block sm:inline sm:ml-1 text-xs opacity-75">({tab.count})</span>
+                            {tab.count !== null && <span className="ml-1 text-xs opacity-75">({tab.count})</span>}
                         </button>
                     ))}
                 </div>
@@ -839,6 +988,98 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     )}
                 </div>}
 
+                {/* Ganancias: interés cobrado y pendiente */}
+                {activeTab === 'profit' && (() => {
+                    const money = (value) => `$${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    const monthLabel = (key) => {
+                        const [year, month] = key.split('-').map(Number);
+                        return new Date(year, month - 1, 1).toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+                    };
+                    if (profitLoading && !profit) {
+                        return <div className="p-12 text-center text-sm text-slate-500">Calculando ganancias...</div>;
+                    }
+                    if (profitError) {
+                        return <div className="p-12 text-center text-sm text-rose-400">{profitError}</div>;
+                    }
+                    if (!profit) return null;
+                    const maxMonth = Math.max(1, ...profit.months.map((item) => item.collected));
+                    const maxLoanProfit = Math.max(1, ...profit.loans.map((item) => item.expected));
+                    const cards = [
+                        { label: 'Ganancia cobrada', value: money(profit.totals.interestEarned), tone: 'text-emerald-400', hint: `${profit.totals.returnOnCapital}% sobre el capital prestado` },
+                        { label: 'Ganancia pendiente', value: money(profit.totals.interestPending), tone: 'text-amber-300', hint: `de ${money(profit.totals.interestExpected)} previstos` },
+                        { label: 'Capital prestado', value: money(profit.totals.capitalLent), tone: 'text-indigo-300', hint: 'suma de todos los préstamos' },
+                        { label: 'Total cobrado', value: money(profit.totals.collected), tone: 'text-cyan-300', hint: `faltan ${money(profit.totals.outstanding)}` }
+                    ];
+                    return (
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
+                                {cards.map((card) => (
+                                    <div key={card.label} className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 p-4 sm:p-6 rounded-3xl shadow-lg">
+                                        <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">{card.label}</p>
+                                        <h3 className={`text-xl sm:text-2xl font-extrabold ${card.tone}`}>{card.value}</h3>
+                                        <p className="mt-1 text-[11px] text-slate-500">{card.hint}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden">
+                                <div className="p-6 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-white">Cobros por mes</h2>
+                                        <p className="mt-1 text-xs text-slate-400">Últimos 12 meses · la parte verde es ganancia (interés)</p>
+                                    </div>
+                                </div>
+                                <ul className="p-4 space-y-3">
+                                    {profit.months.map((item) => (
+                                        <li key={item.month} className="grid grid-cols-[3.5rem_1fr] sm:grid-cols-[4rem_1fr_auto] items-center gap-x-3 gap-y-1">
+                                            <span className="text-xs font-semibold capitalize text-slate-400">{monthLabel(item.month)}</span>
+                                            <div className="h-3 rounded-full bg-slate-800/80 overflow-hidden">
+                                                <div className="h-full flex" style={{ width: `${(item.collected / maxMonth) * 100}%` }}>
+                                                    <div className="h-full bg-emerald-400" style={{ width: `${item.collected > 0 ? (item.interest / item.collected) * 100 : 0}%` }}></div>
+                                                    <div className="h-full flex-1 bg-indigo-500/70"></div>
+                                                </div>
+                                            </div>
+                                            <span className="col-span-2 sm:col-span-1 text-[11px] text-slate-400 sm:text-right">
+                                                {money(item.collected)} cobrado · <span className="text-emerald-400 font-semibold">{money(item.interest)}</span> ganancia
+                                                {item.lent > 0 && <span className="text-slate-500"> · prestado {money(item.lent)}</span>}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+
+                            <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden">
+                                <div className="p-6 border-b border-slate-800/80">
+                                    <h2 className="text-lg font-bold text-white">Ganancia por cliente</h2>
+                                    <p className="mt-1 text-xs text-slate-400">Cobrada frente a la prevista de cada préstamo</p>
+                                </div>
+                                {profit.loans.length === 0 ? (
+                                    <div className="p-8 text-center text-slate-500 text-sm">Todavía no hay préstamos.</div>
+                                ) : (
+                                    <ul className="grid gap-3 p-4">
+                                        {profit.loans.map((item) => (
+                                            <li key={item.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 px-4 py-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <p className="truncate font-semibold text-white">{item.clientName}</p>
+                                                    <p className="text-xs text-slate-400">
+                                                        <span className="font-semibold text-emerald-400">{money(item.earned)}</span> de {money(item.expected)}
+                                                    </p>
+                                                </div>
+                                                <div className="mt-2 h-2 rounded-full bg-slate-800/80 overflow-hidden" style={{ width: `${Math.max(8, (item.expected / maxLoanProfit) * 100)}%` }}>
+                                                    <div className="h-full bg-emerald-400" style={{ width: `${item.expected > 0 ? (item.earned / item.expected) * 100 : 0}%` }}></div>
+                                                </div>
+                                                <p className="mt-1.5 text-[11px] text-slate-500">
+                                                    Capital {money(item.capital)} · cobrado {money(item.collected)} · {item.status === 'Pagado' ? 'pagado' : `faltan ${money(item.outstanding)}`}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })()}
+
             </div>
 
             {/* Modal de historial de pagos */}
@@ -960,6 +1201,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     <input
                                         type="number"
                                         required
+                                        disabled={editingLoanLocked}
                                         value={formData.totalDebt}
                                         onChange={(e) => setFormData({ ...formData, totalDebt: e.target.value })}
                                         placeholder="0.00"
@@ -973,6 +1215,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     <input
                                         type="number"
                                         step="0.01"
+                                        disabled={editingLoanLocked}
                                         value={formData.interestRate}
                                         onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })}
                                         placeholder="Ej. 10"
@@ -981,28 +1224,51 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </div>
                             </div>
 
+                            {editingLoanLocked && (
+                                <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-xl">
+                                    Este préstamo ya tiene pagos registrados: el capital, el interés, las cuotas y las fechas no se pueden cambiar. Solo puedes editar el nombre y el dueño.
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                        Número de Cuotas
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        disabled={editingLoanLocked}
+                                        value={formData.calcMode === 'installments' ? formData.numberOfInstallments : (loanPlan && !loanPlan.error ? loanPlan.installments : '')}
+                                        onChange={(e) => setFormData({ ...formData, numberOfInstallments: e.target.value, calcMode: 'installments' })}
+                                        placeholder="Ej. 4"
+                                        className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <p className="mt-1.5 text-[10px] text-slate-500">Escríbelo y se calcula la cuota</p>
+                                </div>
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
                                         Pago por Cuota ($)
                                     </label>
                                     <input
                                         type="number"
-                                        required
                                         min="0.01"
                                         step="0.01"
-                                        value={formData.installmentAmount}
-                                        onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value })}
+                                        disabled={editingLoanLocked}
+                                        value={formData.calcMode === 'amount' ? formData.installmentAmount : (loanPlan && !loanPlan.error ? loanPlan.payment.toFixed(2) : '')}
+                                        onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value, calcMode: 'amount' })}
                                         placeholder="Ej. 300"
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
-                                    <p className="mt-1.5 text-[10px] text-slate-500">Incluye el interés de cada cuota</p>
+                                    <p className="mt-1.5 text-[10px] text-slate-500">O escribe la cuota y se calcula el nº de cuotas</p>
                                 </div>
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
                                         Frecuencia de Pago
                                     </label>
                                     <select
+                                        disabled={editingLoanLocked}
                                         value={formData.frequency}
                                         onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 cursor-pointer"
@@ -1014,31 +1280,65 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     </select>
                                     <p className="mt-1.5 text-[10px] text-slate-500">Cada cuánto vence una cuota</p>
                                 </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
-                                        Total a pagar ($)
+                                        Fecha de Inicio
                                     </label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-400 font-semibold">$</span>
-                                        <input
-                                            type="text"
-                                            readOnly
-                                            value={(() => {
-                                                const plan = getLoanPlan(formData.totalDebt, formData.interestRate, formData.installmentAmount);
-                                                return plan ? plan.total.toFixed(2) : '';
-                                            })()}
-                                            placeholder="Se calcula solo"
-                                            className="w-full pl-9 pr-4 py-3.5 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl text-sm font-semibold text-indigo-200 placeholder-indigo-300/40 focus:outline-none"
-                                        />
-                                    </div>
-                                    <p className="mt-1.5 text-[10px] text-indigo-300/70">
-                                        {(() => {
-                                            const plan = getLoanPlan(formData.totalDebt, formData.interestRate, formData.installmentAmount);
-                                            return plan ? `${plan.installments} cuotas · interés $${plan.interestPerInstallment.toFixed(2)} por cuota` : 'Capital más interés de todas las cuotas';
-                                        })()}
-                                    </p>
+                                    <input
+                                        type="date"
+                                        disabled={editingLoanLocked}
+                                        value={formData.startDate}
+                                        onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                                        className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <p className="mt-1.5 text-[10px] text-slate-500">Vacía = el día de hoy</p>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                        Fecha de Fin (opcional)
+                                    </label>
+                                    <input
+                                        type="date"
+                                        disabled={editingLoanLocked}
+                                        value={formData.endDate}
+                                        min={formData.startDate || undefined}
+                                        onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                                        className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <p className="mt-1.5 text-[10px] text-slate-500">Si la pones, las cuotas se reparten hasta ese día</p>
                                 </div>
                             </div>
+
+                            {loanPlan && loanPlan.error ? (
+                                <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs rounded-xl text-center">
+                                    {loanPlan.error}
+                                </div>
+                            ) : loanPlan ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300/70">Total a pagar</span>
+                                        <span className="text-lg font-extrabold text-indigo-100">${loanPlan.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300/70">Interés total</span>
+                                        <span className="text-lg font-extrabold text-indigo-100">${loanPlan.interestTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        <span className="block text-[10px] text-indigo-300/70">${loanPlan.interestPerInstallment.toFixed(2)} por cuota</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300/70">Cuotas</span>
+                                        <span className="text-lg font-extrabold text-indigo-100">{loanPlan.installments} × ${loanPlan.payment.toFixed(2)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300/70">Termina</span>
+                                        <span className="text-lg font-extrabold text-indigo-100">{formatDate(loanPlan.endDate)}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-center text-[11px] text-slate-500">Indica el capital y el número de cuotas, la cuota o la fecha de fin para ver el resumen.</p>
+                            )}
 
                             <div className="flex items-center justify-end gap-3 pt-5 border-t border-slate-800/80">
                                 <button
