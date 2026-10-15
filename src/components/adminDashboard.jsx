@@ -3,6 +3,7 @@ import { getAuth, signOut } from 'firebase/auth';
 import { API_URL } from '../services/api';
 import { getFreshToken } from '../services/auth';
 import { getLoanPlan, toInputDate } from '../utils/loanPlan';
+import { APP_URL, openWhatsApp, toWhatsAppNumber } from '../utils/contact';
 import { NEAR_DUE_DAYS, DUE_TONES, formatDate, toDate, isLoanPaid, getLoanDates, getDueInfo } from '../utils/loanDates';
 
 // Inicio, próximo pago (con color del semáforo) y fin del préstamo
@@ -53,6 +54,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [formData, setFormData] = useState({
         clientName: '',
         duenyoDinero: '',
+        phone: '',
+        address: '',
         totalDebt: '',
         interestRate: '',
         frequency: 'Mensual',
@@ -226,7 +229,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
+        setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
         setIsModalOpen(true);
     };
 
@@ -236,6 +239,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         setFormData({
             clientName: loan.clientName || '',
             duenyoDinero: loan.duenyoDinero || '',
+            phone: loan.phone || '',
+            address: loan.address || '',
             totalDebt: loan.totalDebt || '',
             interestRate: loan.interestRate || '',
             frequency: loan.frequency || 'Mensual',
@@ -292,6 +297,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 body: JSON.stringify({
                     clientName: formData.clientName,
                     duenyoDinero: formData.duenyoDinero,
+                    phone: formData.phone,
+                    address: formData.address,
                     totalDebt,
                     interestRate,
                     frequency: formData.frequency,
@@ -309,11 +316,13 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             if (data.credentials) {
                 setNewCredentials({
                     ...data.credentials,
+                    clientName: data.loan?.clientName || formData.clientName,
+                    phone: data.loan?.phone || formData.phone,
                     username: String(data.credentials.username || '').replace(/\d/g, '')
                 });
             }
 
-            setFormData({ clientName: '', duenyoDinero: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
+            setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -501,8 +510,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
 
         const message = `Hola *${loan.clientName}*, te saludamos de la administración financiera. Te recordamos que tienes un pago pendiente de cuota (${frequencyText}) por un monto de *$${installment.toLocaleString(undefined, { maximumFractionDigits: 2 })}*${dueDate ? ` con vencimiento el *${formatDate(dueDate)}*` : ''}. Tu deuda restante actual es de *$${remaining.toLocaleString(undefined, { maximumFractionDigits: 2 })}*. Por favor, realiza tu abono a la brevedad posible. ¡Gracias!`;
 
-        const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-        window.open(whatsappUrl, '_blank');
+        openWhatsApp(loan.phone, message);
     };
 
     const formatCurrency = (value) => (Math.round((Number(value) || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -705,6 +713,13 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                         <div className="mt-1 text-[11px] font-medium text-slate-400">
                                                             Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                         </div>
+                                                        {(loan.phone || loan.address) && (
+                                                            <div className="mt-1 text-[11px] font-medium text-slate-400">
+                                                                {loan.phone && <span>📞 {loan.phone}</span>}
+                                                                {loan.phone && loan.address && ' · '}
+                                                                {loan.address && <span>📍 {loan.address}</span>}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="py-4 px-6">
                                                         <div className="font-bold text-indigo-400">${formatCurrency(remaining)}</div>
@@ -805,6 +820,13 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                     <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
                                                         Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                     </p>
+                                                    {(loan.phone || loan.address) && (
+                                                        <p className="mt-1 text-[11px] font-medium text-slate-400">
+                                                            {loan.phone && <span>📞 {loan.phone}</span>}
+                                                            {loan.phone && loan.address && <br />}
+                                                            {loan.address && <span>📍 {loan.address}</span>}
+                                                        </p>
+                                                    )}
                                                     <p className="mt-1 text-xs text-slate-400">{loan.frequency} · {loan.numberOfInstallments || loan.installments?.length || 0} cuotas · Siguiente: ${formatCurrency(loan.installments?.find((item) => item.status !== 'paid')?.amountDue || loan.installmentAmount)}</p>
                                                     <LoanDates loan={loan} className="mt-2 space-y-0.5 text-[11px]" />
                                                 </div>
@@ -1198,6 +1220,43 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                        Teléfono (WhatsApp)
+                                    </label>
+                                    <input
+                                        type="tel"
+                                        inputMode="tel"
+                                        autoComplete="off"
+                                        required
+                                        value={formData.phone}
+                                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                        placeholder="Ej. 600 123 456"
+                                        className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
+                                    />
+                                    <p className="mt-1.5 text-[10px] text-slate-500">
+                                        {formData.phone && !toWhatsAppNumber(formData.phone)
+                                            ? 'El número no parece válido'
+                                            : 'Sin prefijo se asume +34. Aquí se envían el acceso y los recordatorios'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
+                                        Dirección (calle)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        autoComplete="off"
+                                        required
+                                        value={formData.address}
+                                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                                        placeholder="Ej. Calle Mayor 12, 2ºB"
+                                        className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
                                         Deuda Total ($)
                                     </label>
                                     <input
@@ -1377,7 +1436,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             </div>
                             <h3 className="text-xl font-extrabold text-white tracking-tight">¡Cuenta de Cliente Creada!</h3>
                             <p className="text-xs text-slate-400">
-                                Comparte estas credenciales con el cliente para que pueda acceder a su portal y consultar su deuda.
+                                Envía estas credenciales al cliente junto con el enlace de la app para que pueda entrar a su portal y consultar su deuda.
                             </p>
                         </div>
 
@@ -1412,12 +1471,12 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                         <div className="flex flex-col gap-2.5 pt-2">
                             <button
                                 onClick={() => {
-                                    const text = `Hola, tus credenciales de acceso para la plataforma de préstamos son:\nUsuario: ${newCredentials.username}\nContraseña: ${newCredentials.password}`;
-                                    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+                                    const text = `Hola${newCredentials.clientName ? ` *${newCredentials.clientName}*` : ''}, ya tienes acceso a la plataforma de préstamos para consultar tu deuda y tus pagos.\n\n🔗 Entra aquí: ${APP_URL}\n👤 Usuario: ${newCredentials.username}\n🔑 Contraseña: ${newCredentials.password}`;
+                                    openWhatsApp(newCredentials.phone, text);
                                 }}
                                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-emerald-600/25 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
                             >
-                                💬 Compartir Credenciales por WhatsApp
+                                💬 {newCredentials.phone ? `Enviar acceso a ${newCredentials.phone}` : 'Compartir acceso por WhatsApp'}
                             </button>
                             <button
                                 onClick={() => setNewCredentials(null)}
