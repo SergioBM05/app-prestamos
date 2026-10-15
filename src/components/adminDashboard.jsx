@@ -85,6 +85,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [completeError, setCompleteError] = useState('');
     const [completeSuccessMessage, setCompleteSuccessMessage] = useState(null);
     const [copiedCredential, setCopiedCredential] = useState('');
+    // Compartir el acceso de un cliente ya creado (genera una contraseña nueva)
+    const [accessLoan, setAccessLoan] = useState(null);
+    const [accessLoading, setAccessLoading] = useState(false);
+    const [accessError, setAccessError] = useState('');
     const [activeTab, setActiveTab] = useState('active');
     // Historial de pagos de un préstamo
     const [historyLoan, setHistoryLoan] = useState(null);
@@ -458,6 +462,35 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         setIsPaymentModalOpen(true);
     };
 
+    const handleConfirmShareAccess = async () => {
+        if (!accessLoan) return;
+        setAccessLoading(true);
+        setAccessError('');
+        try {
+            const currentToken = await getValidToken();
+            if (!currentToken) throw new Error('No hay sesión activa');
+            const response = await fetch(`${API_URL}/api/loans/${accessLoan.id}/reset-access`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'No se pudo generar el acceso');
+            setAccessLoan(null);
+            setNewCredentials({
+                username: data.username,
+                password: data.password,
+                clientName: data.clientName,
+                phone: data.phone || accessLoan.phone,
+                renewed: true
+            });
+        } catch (err) {
+            console.error(err);
+            setAccessError(err.message);
+        } finally {
+            setAccessLoading(false);
+        }
+    };
+
     // Cobrar solo el interés de la próxima cuota: el capital pasa a una cuota nueva al final
     const handleInterestPayment = async () => {
         if (!selectedLoanForPayment) return;
@@ -813,6 +846,15 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                                 </button>
                                                             </>
                                                         )}
+                                                        {loan.clientId && (
+                                                            <button
+                                                                onClick={() => { setAccessError(''); setAccessLoan(loan); }}
+                                                                title="Compartir usuario y contraseña con el cliente"
+                                                                className="px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                            >
+                                                                🔑 Acceso
+                                                            </button>
+                                                        )}
                                                         <button
                                                             onClick={() => handleOpenHistory(loan)}
                                                             title="Ver historial de pagos"
@@ -923,6 +965,15 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                                     </div>
                                                 )}
                                                 <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-800/80 pt-3">
+                                                    {loan.clientId && (
+                                                        <button
+                                                            onClick={() => { setAccessError(''); setAccessLoan(loan); }}
+                                                            aria-label={`Compartir acceso de ${loan.clientName}`}
+                                                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-base transition-all hover:bg-cyan-500/20 active:scale-[0.98]"
+                                                        >
+                                                            🔑
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleOpenHistory(loan)}
                                                         aria-label={`Historial de pagos de ${loan.clientName}`}
@@ -1493,6 +1544,44 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 </div>
             )}
 
+            {/* Modal para compartir el acceso de un cliente */}
+            {accessLoan && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6">
+                    <div className="relative my-auto w-full max-w-md bg-slate-900/90 border border-cyan-500/30 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-6 sm:p-8 space-y-5">
+                        <div className="text-center space-y-2">
+                            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-2xl">🔑</div>
+                            <h3 className="text-lg font-extrabold text-white">Compartir acceso</h3>
+                            <p className="text-sm text-slate-300">{accessLoan.clientName}</p>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                            Las contraseñas no se guardan, así que se generará una <span className="text-white font-semibold">contraseña nueva</span> para este cliente.
+                            La anterior dejará de funcionar. Después podrás enviarle usuario, contraseña y el enlace de la app por WhatsApp
+                            {accessLoan.phone ? <> al <span className="text-white font-semibold">{accessLoan.phone}</span></> : ' (este cliente no tiene teléfono guardado: elegirás el contacto)'}.
+                        </p>
+                        {accessError && (
+                            <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs rounded-xl text-center">{accessError}</div>
+                        )}
+                        <div className="flex flex-col-reverse sm:flex-row gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setAccessLoan(null)}
+                                className="min-h-11 flex-1 px-4 py-3 bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-sm font-semibold rounded-2xl border border-slate-700/60 cursor-pointer"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmShareAccess}
+                                disabled={accessLoading}
+                                className="min-h-11 flex-1 px-4 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-sm font-semibold rounded-2xl shadow-lg shadow-cyan-600/25 disabled:opacity-50 cursor-pointer"
+                            >
+                                {accessLoading ? 'Generando...' : 'Generar y compartir'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Modal de Credenciales Creadas */}
             {newCredentials && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/85 backdrop-blur-xl p-4 sm:p-6 animate-[fadeIn_0.25s_ease-out]">
@@ -1504,9 +1593,9 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white shadow-lg shadow-emerald-500/30 mb-1">
                                 🎉
                             </div>
-                            <h3 className="text-xl font-extrabold text-white tracking-tight">¡Cuenta de Cliente Creada!</h3>
+                            <h3 className="text-xl font-extrabold text-white tracking-tight">{newCredentials.renewed ? 'Acceso del Cliente' : '¡Cuenta de Cliente Creada!'}</h3>
                             <p className="text-xs text-slate-400">
-                                Envía estas credenciales al cliente junto con el enlace de la app para que pueda entrar a su portal y consultar su deuda.
+                                {newCredentials.renewed ? 'Se generó una contraseña nueva (la anterior ya no funciona). ' : ''}Envía estas credenciales al cliente junto con el enlace de la app para que pueda entrar a su portal y consultar su deuda.
                             </p>
                         </div>
 
