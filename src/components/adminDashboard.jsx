@@ -64,7 +64,9 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         startDate: '',
         endDate: '',
         // Qué campo manda: 'installments' (nº de cuotas) o 'amount' (pago por cuota); el otro se calcula
-        calcMode: 'installments'
+        calcMode: 'installments',
+        // Cliente que solo paga intereses: el capital se aplaza cada periodo
+        interestOnly: false
     });
     // Estadísticas de ganancias (interés cobrado y pendiente)
     const [profit, setProfit] = useState(null);
@@ -229,7 +231,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
+        setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false });
         setIsModalOpen(true);
     };
 
@@ -249,7 +251,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             startDate: toInputDate(getLoanDates(loan).start),
             // Solo se rellena la fecha de fin si el préstamo se creó con una fecha de fin elegida
             endDate: loan.endDateCustom ? toInputDate(getLoanDates(loan).end) : '',
-            calcMode: 'installments'
+            calcMode: 'installments',
+            interestOnly: Boolean(loan.interestOnly)
         });
         setIsModalOpen(true);
     };
@@ -260,9 +263,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         interestRate: formData.interestRate,
         frequency: formData.frequency,
         startDate: formData.startDate,
-        endDate: formData.endDate,
-        numberOfInstallments: formData.calcMode === 'installments' ? Number(formData.numberOfInstallments) || 0 : 0,
-        installmentAmount: formData.calcMode === 'amount' ? Number(formData.installmentAmount) || 0 : 0
+        endDate: formData.interestOnly ? '' : formData.endDate,
+        // Solo intereses = una única cuota (capital + interés) que se va aplazando
+        numberOfInstallments: formData.interestOnly ? 1 : formData.calcMode === 'installments' ? Number(formData.numberOfInstallments) || 0 : 0,
+        installmentAmount: !formData.interestOnly && formData.calcMode === 'amount' ? Number(formData.installmentAmount) || 0 : 0
     };
     const loanPlan = getLoanPlan(planInput);
     // Con pagos registrados el calendario es definitivo (el backend lo ignora), así que se bloquean esos campos
@@ -299,6 +303,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     duenyoDinero: formData.duenyoDinero,
                     phone: formData.phone,
                     address: formData.address,
+                    interestOnly: formData.interestOnly,
                     totalDebt,
                     interestRate,
                     frequency: formData.frequency,
@@ -322,7 +327,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                 });
             }
 
-            setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments' });
+            setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -451,6 +456,38 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         setSelectedLoanForPayment(loan);
         setAmountPaid('');
         setIsPaymentModalOpen(true);
+    };
+
+    // Cobrar solo el interés de la próxima cuota: el capital pasa a una cuota nueva al final
+    const handleInterestPayment = async () => {
+        if (!selectedLoanForPayment) return;
+        setSubmittingPayment(true);
+        setPaymentError('');
+        setPaymentSuccessMessage(null);
+        try {
+            const currentToken = await getValidToken();
+            if (!currentToken) throw new Error('No hay sesión activa');
+            const response = await fetch(`${API_URL}/api/loans/${selectedLoanForPayment.id}/interest-payment`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Error al cobrar el interés');
+
+            setPaymentSuccessMessage(`Interés cobrado: $${formatCurrency(data.collected)}. El capital sigue pendiente (deuda: $${formatCurrency(data.remainingDebt)}).`);
+            setTimeout(() => {
+                setIsPaymentModalOpen(false);
+                setSelectedLoanForPayment(null);
+                setAmountPaid('');
+                setPaymentSuccessMessage(null);
+                fetchLoans();
+            }, 1800);
+        } catch (err) {
+            console.error(err);
+            setPaymentError(err.message);
+        } finally {
+            setSubmittingPayment(false);
+        }
     };
 
     // Enviar el abono parcial al backend
@@ -709,7 +746,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                             return (
                                                 <tr key={loan.id} className="hover:bg-slate-800/30 transition-colors">
                                                     <td className="py-4 px-6 font-semibold text-white">
-                                                        <div>{loan.clientName}</div>
+                                                        <div>{loan.clientName}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</div>
                                                         <div className="mt-1 text-[11px] font-medium text-slate-400">
                                                             Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                         </div>
@@ -816,7 +853,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         <article key={loan.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 shadow-lg">
                                             <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
                                                 <div className="min-w-0">
-                                                    <h3 className="truncate font-semibold text-white">{loan.clientName}</h3>
+                                                    <h3 className="font-semibold text-white">{loan.clientName}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</h3>
                                                     <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
                                                         Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                     </p>
@@ -1136,6 +1173,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                             <p className="font-semibold text-emerald-400">+${formatCurrency(item.amount)}</p>
                                             <p className="text-[11px] text-slate-400">
                                                 {formatDate(toDate(item.createdAt))}
+                                                {item.type === 'interes' && ' · Solo interés (capital aplazado)'}
                                                 {item.installmentNumbers?.length > 0 && ` · Cuota${item.installmentNumbers.length > 1 ? 's' : ''} ${item.installmentNumbers.join(', ')}`}
                                             </p>
                                         </div>
@@ -1291,6 +1329,20 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </div>
                             )}
 
+                            <label className={`flex items-start gap-3 rounded-2xl border p-4 cursor-pointer transition-colors ${formData.interestOnly ? 'border-amber-500/40 bg-amber-500/10' : 'border-slate-800/90 bg-slate-950/50 hover:border-slate-700'} ${editingLoanLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                <input
+                                    type="checkbox"
+                                    disabled={editingLoanLocked}
+                                    checked={formData.interestOnly}
+                                    onChange={(e) => setFormData({ ...formData, interestOnly: e.target.checked })}
+                                    className="mt-0.5 h-5 w-5 shrink-0 accent-amber-500"
+                                />
+                                <span>
+                                    <span className="block text-sm font-semibold text-white">El cliente solo paga intereses</span>
+                                    <span className="block text-[11px] text-slate-400">La deuda de capital no baja: cada periodo se cobra solo el interés y el capital sigue pendiente hasta que lo liquide.</span>
+                                </span>
+                            </label>
+
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-300/80 mb-1.5">
@@ -1300,8 +1352,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         type="number"
                                         min="1"
                                         step="1"
-                                        disabled={editingLoanLocked}
-                                        value={formData.calcMode === 'installments' ? formData.numberOfInstallments : (loanPlan && !loanPlan.error ? loanPlan.installments : '')}
+                                        disabled={editingLoanLocked || formData.interestOnly}
+                                        value={formData.interestOnly ? 1 : formData.calcMode === 'installments' ? formData.numberOfInstallments : (loanPlan && !loanPlan.error ? loanPlan.installments : '')}
                                         onChange={(e) => setFormData({ ...formData, numberOfInstallments: e.target.value, calcMode: 'installments' })}
                                         placeholder="Ej. 4"
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -1316,8 +1368,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         type="number"
                                         min="0.01"
                                         step="0.01"
-                                        disabled={editingLoanLocked}
-                                        value={formData.calcMode === 'amount' ? formData.installmentAmount : (loanPlan && !loanPlan.error ? loanPlan.payment.toFixed(2) : '')}
+                                        disabled={editingLoanLocked || formData.interestOnly}
+                                        value={formData.interestOnly ? '' : formData.calcMode === 'amount' ? formData.installmentAmount : (loanPlan && !loanPlan.error ? loanPlan.payment.toFixed(2) : '')}
                                         onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value, calcMode: 'amount' })}
                                         placeholder="Ej. 300"
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -1363,8 +1415,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     </label>
                                     <input
                                         type="date"
-                                        disabled={editingLoanLocked}
-                                        value={formData.endDate}
+                                        disabled={editingLoanLocked || formData.interestOnly}
+                                        value={formData.interestOnly ? '' : formData.endDate}
                                         min={formData.startDate || undefined}
                                         onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                                         className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -1376,6 +1428,24 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                             {loanPlan && loanPlan.error ? (
                                 <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs rounded-xl text-center">
                                     {loanPlan.error}
+                                </div>
+                            ) : loanPlan && formData.interestOnly ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-200/70">Interés por periodo</span>
+                                        <span className="text-lg font-extrabold text-amber-100">${loanPlan.interestPerInstallment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        <span className="block text-[10px] text-amber-200/70">{formData.frequency.toLowerCase()}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-200/70">Capital pendiente</span>
+                                        <span className="text-lg font-extrabold text-amber-100">${Number(formData.totalDebt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        <span className="block text-[10px] text-amber-200/70">no baja mientras pague solo intereses</span>
+                                    </div>
+                                    <div className="col-span-2 sm:col-span-1">
+                                        <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-200/70">Primer cobro</span>
+                                        <span className="text-lg font-extrabold text-amber-100">{formatDate(new Date(loanPlan.endDate))}</span>
+                                        <span className="block text-[10px] text-amber-200/70">luego uno cada periodo</span>
+                                    </div>
                                 </div>
                             ) : loanPlan ? (
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4">
@@ -1577,6 +1647,32 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     );
                                 })()}
                             </div>
+
+                            {(() => {
+                                const next = (selectedLoanForPayment.installments || []).find((item) => item.status !== 'paid');
+                                const interest = Number(next?.interestAmount || 0);
+                                const principal = Number(next?.principalAmount || 0);
+                                const paid = Number(next?.paidAmount || 0);
+                                if (!next || interest <= 0 || principal <= 0 || paid > interest + 0.005) return null;
+                                return (
+                                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
+                                        <div>
+                                            <p className="text-xs font-semibold text-amber-200">¿El cliente solo paga el interés?</p>
+                                            <p className="mt-1 text-[11px] text-amber-100/70">
+                                                Se cobra el interés de la cuota {next.installmentNumber} y su capital (${formatCurrency(principal)}) pasa a una cuota nueva al final. La deuda de capital no baja.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleInterestPayment}
+                                            disabled={submittingPayment || paymentSuccessMessage}
+                                            className="min-h-11 w-full px-4 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-500/40 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                            Cobrar solo el interés: ${formatCurrency(interest - paid)}
+                                        </button>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800/80">
                                 <button
