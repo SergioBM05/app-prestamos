@@ -85,6 +85,8 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const [completeError, setCompleteError] = useState('');
     const [completeSuccessMessage, setCompleteSuccessMessage] = useState(null);
     const [copiedCredential, setCopiedCredential] = useState('');
+    // Aviso cuando un cliente que ya terminó un préstamo vuelve a pedir prestado
+    const [returningNotice, setReturningNotice] = useState(null);
     // Compartir el acceso de un cliente ya creado (genera una contraseña nueva)
     const [accessLoan, setAccessLoan] = useState(null);
     const [accessLoading, setAccessLoading] = useState(false);
@@ -329,6 +331,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     phone: data.loan?.phone || formData.phone,
                     username: String(data.credentials.username || '').replace(/\d/g, '')
                 });
+            }
+
+            if (data.returningClient) {
+                setReturningNotice(`${data.loan.clientName} ya era cliente: se le ha dado su préstamo nº ${data.loan.loanNumber} y conserva su mismo usuario y contraseña.`);
             }
 
             setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false });
@@ -725,6 +731,19 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     ))}
                 </div>
 
+                {returningNotice && (
+                    <div className="flex items-start justify-between gap-3 p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm rounded-2xl">
+                        <span>🔁 {returningNotice}</span>
+                        <button
+                            onClick={() => setReturningNotice(null)}
+                            aria-label="Cerrar aviso"
+                            className="shrink-0 text-emerald-400/70 hover:text-emerald-200 cursor-pointer"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
+
                 {/* Tabla de Clientes / Préstamos con Proyecciones e Intereses */}
                 {activeTab === 'active' && <div className="bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden animate-[fadeIn_1s_ease-out_0.4s_both]">
                     <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
@@ -779,7 +798,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                             return (
                                                 <tr key={loan.id} className="hover:bg-slate-800/30 transition-colors">
                                                     <td className="py-4 px-6 font-semibold text-white">
-                                                        <div>{loan.clientName}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</div>
+                                                        <div>{loan.clientName}{loan.loanNumber > 1 && <span className="ml-2 align-middle rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">Préstamo nº {loan.loanNumber}</span>}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</div>
                                                         <div className="mt-1 text-[11px] font-medium text-slate-400">
                                                             Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                         </div>
@@ -895,7 +914,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                         <article key={loan.id} className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 shadow-lg">
                                             <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
                                                 <div className="min-w-0">
-                                                    <h3 className="font-semibold text-white">{loan.clientName}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</h3>
+                                                    <h3 className="font-semibold text-white">{loan.clientName}{loan.loanNumber > 1 && <span className="ml-2 align-middle rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">Préstamo nº {loan.loanNumber}</span>}{loan.interestOnly && <span className="ml-2 align-middle rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">Solo intereses</span>}</h3>
                                                     <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
                                                         Dueño: <span className="text-cyan-300/80">{loan.duenyoDinero || 'No especificado'}</span>
                                                     </p>
