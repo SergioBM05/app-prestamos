@@ -66,7 +66,9 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
         // Qué campo manda: 'installments' (nº de cuotas) o 'amount' (pago por cuota); el otro se calcula
         calcMode: 'installments',
         // Cliente que solo paga intereses: el capital se aplaza cada periodo
-        interestOnly: false
+        interestOnly: false,
+        // Cuenta del cliente cuando se reactiva una deuda ya pagada (se reutiliza su usuario)
+        reuseClientId: ''
     });
     // Estadísticas de ganancias (interés cobrado y pendiente)
     const [profit, setProfit] = useState(null);
@@ -237,7 +239,30 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
     const handleOpenCreateModal = () => {
         setEditingLoan(null);
         setFormError('');
-        setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false });
+        setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false, reuseClientId: '' });
+        setIsModalOpen(true);
+    };
+
+    // Reactivar una deuda ya pagada: nuevo préstamo con los datos de la persona y su misma cuenta de acceso
+    const handleReactivate = (loan) => {
+        setEditingLoan(null);
+        setFormError('');
+        setFormData({
+            clientName: loan.clientName || '',
+            duenyoDinero: loan.duenyoDinero || '',
+            phone: loan.phone || '',
+            address: loan.address || '',
+            totalDebt: '',
+            interestRate: '',
+            frequency: loan.frequency || 'Mensual',
+            installmentAmount: '',
+            numberOfInstallments: '',
+            startDate: '',
+            endDate: '',
+            calcMode: 'installments',
+            interestOnly: false,
+            reuseClientId: loan.clientId
+        });
         setIsModalOpen(true);
     };
 
@@ -310,6 +335,7 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                     phone: formData.phone,
                     address: formData.address,
                     interestOnly: formData.interestOnly,
+                    clientId: formData.reuseClientId || undefined,
                     totalDebt,
                     interestRate,
                     frequency: formData.frequency,
@@ -334,10 +360,11 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
             }
 
             if (data.returningClient) {
+                setActiveTab('active'); // el préstamo nuevo aparece en la lista principal
                 setReturningNotice(`${data.loan.clientName} ya era cliente: se le ha dado su préstamo nº ${data.loan.loanNumber} y conserva su mismo usuario y contraseña.`);
             }
 
-            setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false });
+            setFormData({ clientName: '', duenyoDinero: '', phone: '', address: '', totalDebt: '', interestRate: '', frequency: 'Mensual', installmentAmount: '', numberOfInstallments: '', startDate: '', endDate: '', calcMode: 'installments', interestOnly: false, reuseClientId: '' });
             setIsModalOpen(false);
             setEditingLoan(null);
             fetchLoans();
@@ -1104,6 +1131,15 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                             <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400">
                                                 Pagado
                                             </span>
+                                            {loan.clientId && !loans.some((other) => other.clientId === loan.clientId && !isLoanPaid(other)) && (
+                                                <button
+                                                    onClick={() => handleReactivate(loan)}
+                                                    title="Nuevo préstamo con los datos de este cliente"
+                                                    className="min-h-11 px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                                >
+                                                    🔄 Reactivar
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => handleOpenDeleteModal(loan)}
                                                 aria-label={`Eliminar préstamo de ${loan.clientName}`}
@@ -1270,10 +1306,10 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                 </div>
                                 <div>
                                     <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                                        {editingLoan ? 'Modificar Préstamo' : 'Registrar Nuevo Préstamo'}
+                                        {editingLoan ? 'Modificar Préstamo' : formData.reuseClientId ? 'Reactivar Deuda' : 'Registrar Nuevo Préstamo'}
                                     </h3>
                                     <p className="text-xs text-slate-400">
-                                        {editingLoan ? 'Actualiza los datos del préstamo' : 'Completa los datos financieros del cliente'}
+                                        {editingLoan ? 'Actualiza los datos del préstamo' : formData.reuseClientId ? 'Nuevo préstamo para un cliente que ya pagó' : 'Completa los datos financieros del cliente'}
                                     </p>
                                 </div>
                             </div>
@@ -1300,10 +1336,16 @@ export default function AdminDashboard({ user: initialUser, token, onLogout }) {
                                     type="text"
                                     required
                                     value={formData.clientName}
+                                    readOnly={Boolean(formData.reuseClientId)}
                                     onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
                                     placeholder="Ej. Carlos Mendoza"
-                                    className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300"
+                                    className={`w-full px-4 py-3.5 bg-slate-950/80 border border-slate-800/90 rounded-2xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 transition-all duration-300 ${formData.reuseClientId ? 'opacity-60' : ''}`}
                                 />
+                                {formData.reuseClientId && (
+                                    <p className="mt-1.5 text-[11px] text-cyan-300/80">
+                                        Se usan sus datos y su misma cuenta: conserva su usuario y contraseña, no se crea una nueva.
+                                    </p>
+                                )}
                             </div>
 
                             <div>
