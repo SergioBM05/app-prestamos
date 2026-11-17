@@ -4,14 +4,17 @@ import { auth } from './services/firebase';
 import Login from './components/login';
 import AdminDashboard from './components/adminDashboard';
 import ClientDashboard from './components/clientDashboard';
+import { MODO_DEMO, USUARIO_DEMO, salirDeDemo } from './services/demo';
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // En modo demo se entra directamente con un usuario de prueba (sin tocar la sesión real)
+  const [user, setUser] = useState(MODO_DEMO ? USUARIO_DEMO : null);
+  const [token, setToken] = useState(MODO_DEMO ? 'demo' : null);
+  const [loading, setLoading] = useState(!MODO_DEMO);
 
   // 1. Recuperar la sesión del localStorage si el usuario recarga la página
   useEffect(() => {
+    if (MODO_DEMO) return;
     const savedToken = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
 
@@ -37,6 +40,7 @@ export default function App() {
 
   // 3. Función para cerrar sesión (aquí usamos localStorage.removeItem)
   const handleLogout = async () => {
+    if (MODO_DEMO) return salirDeDemo();
     try {
       await signOut(auth);
       setUser(null);
